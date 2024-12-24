@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "pathPattern": "/create-bid",
+      "apiPath": "/api/create-bid"
+    }
+  ]
+}
