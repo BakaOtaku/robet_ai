@@ -1,40 +1,41 @@
-import os
-import time
-import signal
 from flask import Flask, request, jsonify
-from moviepy.editor import VideoFileClip
-import whisper
+import os
 import openai
+import  uuid
 
-# Set OpenAI API key
-openai.api_key = "your_openai_api_key"  # Replace with your OpenAI API key
+from sqlalchemy import create_engine, Column, String, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-# Load Whisper model
-model = whisper.load_model("base")  # Use a model like "tiny", "base", "small", "medium", or "large"
+openai.api_key = "<open-ai-key>"
 
-# Directory to save transcriptions and temporary audio files
-output_dir = "audio_transcriptions"
-os.makedirs(output_dir, exist_ok=True)
+Base = declarative_base()
+engine = create_engine("sqlite:///app_data.db")
+Session = sessionmaker(bind=engine)
+session = Session()
 
-def extract_audio_from_video(video_path, audio_path):
-    """Extract audio from the video and save it as a separate file."""
-    clip = VideoFileClip(video_path)
-    clip.audio.write_audiofile(audio_path)
-    print(f"Audio extracted and saved to {audio_path}")
 
-def transcribe_audio(audio_path):
-    """Transcribe audio using Whisper."""
-    print("Transcribing audio...")
-    result = model.transcribe(audio_path) 
-    transcription = result["text"]
-    return transcription
+class TranscriptionData(Base):
+    __tablename__ = "transcription_data"
 
-def analyze_caption_with_gpt(caption_text, task_content):
-    """Use OpenAI GPT to analyze whether the task content is mentioned in the caption."""
+    id = Column(String, primary_key=True)
+    query = Column(String, nullable=False)
+    transcription = Column(String, nullable=False)
+    result = Column(Boolean, nullable=False)
+
+Base.metadata.create_all(engine)
+
+app = Flask(__name__)
+
+upload_dir = "uploads"
+os.makedirs(upload_dir, exist_ok=True)
+
+def analyze_transcription_with_query(transcription, query):
+    """Analyzes the transcription to check if the query is mentioned."""
     try:
         prompt = (
-            f"Given the following caption: \"{caption_text}\"\n\n"
-            f"You are an assistant tasked with determining if the following task content was mentioned in the caption: \"{task_content}\"\n\n"
+            f"Given the following transcription: \"{transcription}\"\n\n"
+            f"You are an assistant tasked with determining if the following query is mentioned: \"{query}\"\n\n"
             "Respond with only 'true' or 'false'."
         )
 
@@ -43,66 +44,72 @@ def analyze_caption_with_gpt(caption_text, task_content):
             messages=[{"role": "system", "content": prompt}],
         )
         result = response.choices[0].message.content.strip().lower()
-        print(f"Result from caption analysis: {result}")
         return result == "true"
     except Exception as e:
-        print(f"Error analyzing caption with GPT: {e}")
-        return False
+        raise Exception(f"Error in analysis: {str(e)}")
 
-# Initialize Flask app
-app = Flask(__name__)
+@app.route('/')
+def index():
+    return "Flask server is running!"
 
-@app.route('/resolve', methods=['POST'])
-def resolve():
-    """API endpoint to process video and analyze captions with GPT."""
+@app.route('/process', methods=['POST'])
+def process_file():
     if 'file' not in request.files or 'query' not in request.form:
         return jsonify({"error": "File and query are required"}), 400
 
     file = request.files['file']
     query = request.form['query']
 
-    if not file or not query:
-        return jsonify({"error": "Invalid input"}), 400
-
-    # Save the uploaded video file temporarily
-    video_path = os.path.join(output_dir, file.filename)
-    audio_path = os.path.join(output_dir, "temp_audio.wav")
-    file.save(video_path)
-
+    # Save the file locally
+    file_path = os.path.join(upload_dir, file.filename)
+    file.save(file_path)
     try:
-        # Extract audio from the video
-        extract_audio_from_video(video_path, audio_path)
-
-        # Transcribe the audio
-        transcription = transcribe_audio(audio_path)
-
-        # Analyze the transcription with GPT
-        result = analyze_caption_with_gpt(transcription, query)
-
-        # Cleanup temporary files
-        os.remove(video_path)
-        os.remove(audio_path)
-
-        return jsonify({"query": query, "result": result})
+        with open(file_path, "rb") as audio_file:
+            response = openai.Audio.transcribe(
+                model="whisper-1",
+                file=audio_file
+            )
+        transcription = response['text']
     except Exception as e:
-        print(f"Error processing request: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Error in transcription: {str(e)}"}), 500
 
-@app.route('/')
-def index():
-    return "Video Processing and Analysis API is running!"
 
-def signal_handler(sig, frame):
-    """Handle SIGINT (Ctrl+C) and terminate the program gracefully."""
-    print("\nCtrl+C detected! Shutting down gracefully...")
-    exit(0)
+    result=analyze_transcription_with_query(transcription=transcription, query=query)
+
+    unique_id = str(uuid.uuid4())
+    new_entry = TranscriptionData(
+        id=unique_id,
+        query=query,
+        transcription=transcription,
+        result=result
+    )
+    session.add(new_entry)
+    session.commit()
+
+
+    return jsonify({"message": query, "transcription": transcription,"result": result,"id": unique_id})
+
+
+@app.route('/result/<uuid>', methods=['GET'])
+def get_result(uuid):
+    """Retrieve the result for a given UUID."""
+    try:
+        result = session.query(TranscriptionData).filter_by(id=uuid).first()
+        if not result:
+            return jsonify({"error": "No entry found for the given UUID."}), 404
+
+        return jsonify({
+            "id": result.id,
+            "query": result.query,
+            "transcription": result.transcription,
+            "result": result.result
+        })
+    except Exception as e:
+        return jsonify({"error": f"Error retrieving result: {str(e)}"}), 500
 
 def main():
-    # Register the SIGINT handler
-    signal.signal(signal.SIGINT, signal_handler)
-
     # Run the Flask server
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=8545)
 
 if __name__ == "__main__":
     main()
