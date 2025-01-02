@@ -1,9 +1,9 @@
-### ROBET – Decentralized AI-Powered Betting Platform
+### ROBET – Decentralized AI-Powered Prediction Markets Platform
 
 ---
 
 ## **Introduction**  
-ROBET is a decentralized, AI-powered betting platform designed to empower users to create and participate in bets on **any event**. Unlike traditional platforms like Polymarket, ROBET removes the restrictions of whitelisting and human resolvers, enabling **real-time, scalable, and transparent betting**.
+ROBET is a decentralized, AI-powered Prediction Markets platform designed to empower users to create and participate in bets on **any event**. Unlike traditional platforms like Polymarket, ROBET removes the restrictions of whitelisting and human resolvers, enabling **real-time, scalable, and transparent betting**.
 
 **Video:** [VimeoLink](https://vimeo.com/1041856045?share=copy) 
 
@@ -131,7 +131,6 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 ## **Contact**  
 Have questions or ideas? Reach out to us!  
-- Twitter: [@RobetPlatform](https://twitter.com/RobetPlatform)  
-- Email: robet-support@example.com  
+- Twitter: [@robet_ai](https://twitter.com/robet_ai)  
 
-Let’s build the future of betting together! 🌟
+Let’s build the future of prediction markets together! 🌟
