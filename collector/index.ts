@@ -1,11 +1,9 @@
-// fetchTweets.ts
-
 import { config } from 'dotenv';
 
 // Load environment variables from .env file
 config();
 
-const token: string | undefined = process.env.BEARER_TOKEN;
+const token: string = process.env.BEARER_TOKEN!;
 
 
 async function getLatestTweets() {
@@ -35,3 +33,30 @@ async function getLatestTweets() {
         throw error;
     }
 }
+
+function extractRobetTweets(tweets: any): Array<{ url: string, betQuestion: string }> {
+    const extractedData: Array<{ url: string, betQuestion: string }> = [];
+
+    tweets.data.forEach((tweet: any) => {
+        const text = tweet.text;
+        const match = text.match(/^ROBET\s+(https?:\/\/\S+)\s+(.*)$/i);
+
+        if (match) {
+            const url = match[1];
+            const betQuestion = match[2];
+            extractedData.push({ url, betQuestion });
+        }
+    });
+
+    return extractedData;
+}
+
+// Call getLatestTweets and process the response
+getLatestTweets()
+    .then(tweets => {
+        const robetTweets = extractRobetTweets(tweets);
+        console.log('Extracted ROBET tweets:', robetTweets);
+    })
+    .catch(error => {
+        console.error('Failed to fetch tweets:', error);
+    });
