@@ -1,6 +1,3 @@
-//////////////////////////////////////////////
-// server.js
-//////////////////////////////////////////////
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
@@ -21,9 +18,9 @@ const IDL_PATH = path.join(__dirname, "./game.json");
 const idl = JSON.parse(fs.readFileSync(IDL_PATH, "utf-8"));
 
 // Replace with your real program ID:
-const PROGRAM_ID = new PublicKey(
-  "8iMWoGnfjJHCGoYiVF176cQm1SkZVrX2V39RavfED8eX"
-);
+// const PROGRAM_ID = new PublicKey(
+//   "8iMWoGnfjJHCGoYiVF176cQm1SkZVrX2V39RavfED8eX"
+// );
 
 // Minimal provider that doesn't sign on the server
 const connection = new Connection(clusterApiUrl("devnet"));
@@ -57,41 +54,38 @@ app.use((req, res, next) => {
   next();
 });
 
-// Remove individual CORS headers from endpoints since they're now set globally
-
 // -----------------------------------------------------------------------------
-// 3) CREATE BID ENDPOINTS (From your original script)
-//    GET /create-bid and POST /create-bid
+// 3) CREATE BID ENDPOINTS
 // -----------------------------------------------------------------------------
 
-// GET /create-bid - Show user an Action for creating a new bid
 app.get("/create-bid", async (req, res) => {
   try {
     const actionMetadata = {
       type: "action",
-      icon: "https://cryptologos.cc/logos/solana-sol-logo.png",
-      title: "🎲 Create a New Bid",
-      description: "Start a new prediction market by creating a bid.",
-      label: "Create Bid",
+      icon: "https://github.com/user-attachments/assets/6a5fd3c0-8e9c-4cfe-9d85-bcf177b2b4ba",
+      title: "🎲 Create Prediction Market",
+      description:
+        "Create a new prediction market where users can bet with SOL.",
+      label: "Create Market",
       links: {
         actions: [
           {
-            label: "📝 Create New Bid",
+            label: "📝 Create Prediction",
             href: `/create-bid?bidId={bidId}&bidContent={bidContent}`,
             style: {
               primary: true,
-              color: "#14F195", // Solana green
+              color: "#14F195",
             },
             parameters: [
               {
                 name: "bidId",
-                label: "🔑 Unique Bid ID",
+                label: "🔑 Market ID",
                 placeholder: "e.g., sol-100-eoy",
                 required: true,
               },
               {
                 name: "bidContent",
-                label: "❓ Your Prediction Question",
+                label: "❓ Prediction Question",
                 placeholder: "e.g., Will SOL reach $100 by end of year?",
                 required: true,
                 multiline: true,
@@ -102,20 +96,14 @@ app.get("/create-bid", async (req, res) => {
         ],
       },
     };
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(200).json(actionMetadata);
   } catch (error) {
     res.status(500).json({
       error: `GET /create-bid Error: ${error.message}`,
-      headers: {
-        "X-Action-Version": "2.1.3",
-        "X-Blockchain-Ids": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-      },
     });
   }
 });
 
-// POST /create-bid - Returns a transaction to create a new bid
 app.post("/create-bid", async (req, res) => {
   try {
     const { account } = req.body;
@@ -127,13 +115,11 @@ app.post("/create-bid", async (req, res) => {
       });
     }
 
-    // Derive the PDA
     const [bidPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("bid"), Buffer.from(bidId as string)],
       program.programId
     );
 
-    // Build the createBid instruction
     const ix = await program.methods
       .createBid(bidId as string, bidContent as string)
       .accountsStrict({
@@ -143,7 +129,6 @@ app.post("/create-bid", async (req, res) => {
       })
       .instruction();
 
-    // Create the transaction
     const userPubkey = new PublicKey(account);
     const { blockhash } = await connection.getLatestBlockhash();
     const transaction = new Transaction({
@@ -152,40 +137,25 @@ app.post("/create-bid", async (req, res) => {
     });
     transaction.add(ix);
 
-    // Return base64
     const serializedTx = transaction.serialize({
       requireAllSignatures: false,
       verifySignatures: false,
     });
     const base64Tx = serializedTx.toString("base64");
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(200).json({
       transaction: base64Tx,
-      message: `Creating bid (“${bidId}”).`,
+      message: `Creating prediction market: "${bidContent}"`,
     });
   } catch (error) {
     res.status(500).json({
       error: `POST /create-bid Error: ${error.message}`,
-      headers: {
-        "X-Action-Version": "2.1.3",
-        "X-Blockchain-Ids": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-      },
     });
   }
 });
 
-// Preflight OPTIONS for /create-bid
-app.options("/create-bid", (req, res) => {
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
-  res.sendStatus(200);
-});
-
 // -----------------------------------------------------------------------------
 // 4) PLACE BID ENDPOINTS
-//    GET /bid - Show existing Bid info + actions to "Vote Yes" or "Vote No"
-//    POST /bid - Returns a transaction for placeBid(bidId, vote)
 // -----------------------------------------------------------------------------
 
 // GET /bid - Return blink metadata for an existing bid, plus "Yes"/"No" actions
@@ -206,16 +176,19 @@ app.get("/bid", async (req, res) => {
     try {
       bidAccount = await program.account.bid.fetch(bidPda);
     } catch (fetchErr) {
-      return res.status(404).json({ message: "Bid not found on chain" });
+      return res.status(404).json({ message: "Prediction market not found" });
     }
 
-    // Format numbers with commas
+    // Format numbers
     const yesVotes = bidAccount.yesVotes
       .toString()
       .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     const noVotes = bidAccount.noVotes
       .toString()
       .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const totalAmount = (
+      Number(bidAccount.totalAmount) / 1_000_000_000
+    ).toFixed(2);
 
     // Calculate total votes and percentages
     const totalVotes = Number(bidAccount.yesVotes) + Number(bidAccount.noVotes);
@@ -228,83 +201,114 @@ app.get("/bid", async (req, res) => {
         ? ((Number(bidAccount.noVotes) / totalVotes) * 100).toFixed(1)
         : "0";
 
-    // Format creation date
     const createdDate = new Date(
       bidAccount.createdAt * 1000
     ).toLocaleDateString();
 
-    const statusStr =
-      typeof bidAccount.status.open === "object" ? "🟢 Open" : "🔒 Resolved";
+    // Determine status & winner info
+    let statusStr,
+      winnerStr = "";
+    let bettingInfo = "";
+
+    if (typeof bidAccount.status.resolved === "object") {
+      statusStr = "🔒 Resolved";
+      const outcome = bidAccount.outcome ? "YES" : "NO";
+      const reward = (
+        Number(bidAccount.rewardPerWinner) / 1_000_000_000
+      ).toFixed(2);
+      winnerStr = `
+🏆 Winning Side: ${outcome}\n
+💰 Reward per winner: ${reward} SOL\n
+📊 Total Pool: ${(Number(bidAccount.totalAmount) / 1_000_000_000).toFixed(
+        2
+      )} SOL`;
+    } else {
+      statusStr = "🟢 Open for Betting";
+      bettingInfo = `
+📊 **Current Stats**
+━━━━━━━━━━━━━━━━━━━━━━
+✅ Yes Bets: ${yesVotes} (${yesPercentage}%)\n
+❌ No Bets: ${noVotes} (${noPercentage}%)\n
+💰 Total Pool: ${totalAmount} SOL\n
+
+ℹ️ Each bet costs 0.01 SOL
+🎁 Winners split the total pool!
+`;
+    }
+
     const description = `
-🎲 Bid #${bidId}
+${winnerStr}
+${bettingInfo}
 
-📊 **Current Results**
-━━━━━━━━━━━━━━━━━━━���━━
-✅ Yes Votes: ${yesVotes} (${yesPercentage}%)
-❌ No Votes: ${noVotes} (${noPercentage}%)
-
-ℹ️ **Bid Details**
 ━━━━━━━━━━━━━━━━━━━━━━
 
 👤 Created by: ${bidAccount.creator
       .toString()
-      .slice(0, 4)}...${bidAccount.creator.toString().slice(-4)}
-
-📅 Created: ${createdDate}
-
+      .slice(0, 4)}...${bidAccount.creator.toString().slice(-4)}\n
+📅 Created: ${createdDate}\n
 🏷️ Status: ${statusStr}
     `.trim();
 
-    const isOpen = bidAccount.status === 0;
+    const isOpen = typeof bidAccount.status.open === "object";
+    let actions = [];
+
+    if (isOpen) {
+      actions = [
+        {
+          label: "✅ Bet Yes (0.01 SOL)",
+          href: `/bid?bidId=${bidId}&vote=true`,
+          style: {
+            primary: true,
+            color: "#14F195",
+          },
+        },
+        {
+          label: "❌ Bet No (0.01 SOL)",
+          href: `/bid?bidId=${bidId}&vote=false`,
+          style: {
+            color: "#FF3B3B",
+          },
+        },
+      ];
+    } else if (typeof bidAccount.status.resolved === "object") {
+      // Add claim button for resolved bids
+      const reward = (
+        Number(bidAccount.rewardPerWinner) / 1_000_000_000
+      ).toFixed(2);
+      actions = [
+        {
+          label: `🎉 Claim ${reward} SOL Reward`,
+          href: `/claim-reward?bidId=${bidId}`,
+          style: {
+            primary: true,
+            color: "#14F195",
+          },
+        },
+      ];
+    }
 
     const actionMetadata = {
       type: "action",
-      icon: "https://cryptologos.cc/logos/solana-sol-logo.png",
-      title: `📝 Question: ${bidAccount.content}`,
+      icon: "https://github.com/user-attachments/assets/6a5fd3c0-8e9c-4cfe-9d85-bcf177b2b4ba",
+      title: `📝 ${bidAccount.content}`,
       description,
-      label: "Cast Your Vote",
+      label: isOpen ? "Place Your Bet" : "Market Resolved",
       links: {
-        actions: [
-          {
-            label: "✅ Vote Yes",
-            href: `/bid?bidId=${bidId}&vote=true`,
-            style: {
-              primary: true,
-              color: "#14F195", // Solana green
-            },
-            disabled: !isOpen,
-          },
-          {
-            label: "❌ Vote No",
-            href: `/bid?bidId=${bidId}&vote=false`,
-            style: {
-              color: "#FF3B3B", // Solana red
-            },
-            disabled: !isOpen,
-          },
-        ],
+        actions: actions,
       },
     };
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(200).json(actionMetadata);
   } catch (error) {
     res.status(500).json({
       error: `GET /bid Error: ${error.message}`,
-      headers: {
-        "X-Action-Version": "2.1.3",
-        "X-Blockchain-Ids": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-      },
     });
   }
 });
 
-// POST /bid - Return a transaction for placeBid(bidId, vote)
 app.post("/bid", async (req, res) => {
   try {
-    // The user’s wallet pubkey in the body
     const { account } = req.body;
-    // The bidId + vote in the query
     const { bidId, vote } = req.query;
 
     if (!account || !bidId || vote === undefined) {
@@ -313,10 +317,8 @@ app.post("/bid", async (req, res) => {
       });
     }
 
-    // Convert "vote" string to bool
     const voteBool = vote === "true";
 
-    // Derive PDAs
     const [bidPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("bid"), Buffer.from(bidId as string)],
       program.programId
@@ -330,7 +332,6 @@ app.post("/bid", async (req, res) => {
       program.programId
     );
 
-    // Build the placeBid instruction
     const ix = await program.methods
       .placeBid(bidId as string, voteBool)
       .accountsStrict({
@@ -341,7 +342,6 @@ app.post("/bid", async (req, res) => {
       })
       .instruction();
 
-    // Construct Transaction
     const userPubkey = new PublicKey(account);
     const { blockhash } = await connection.getLatestBlockhash();
     const transaction = new Transaction({
@@ -350,46 +350,141 @@ app.post("/bid", async (req, res) => {
     });
     transaction.add(ix);
 
-    // Return base64
     const serializedTx = transaction.serialize({
       requireAllSignatures: false,
       verifySignatures: false,
     });
     const base64Tx = serializedTx.toString("base64");
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(200).json({
       transaction: base64Tx,
-      message: `Placing bid on (“${bidId}”) with vote=${voteBool}`,
+      message: `Placing ${voteBool ? "YES" : "NO"} bet (0.01 SOL)`,
     });
   } catch (error) {
     res.status(500).json({
       error: `POST /bid Error: ${error.message}`,
-      headers: {
-        "X-Action-Version": "2.1.3",
-        "X-Blockchain-Ids": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-      },
     });
   }
 });
 
-// Preflight OPTIONS for /bid
 app.options("/bid", (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
   res.sendStatus(200);
 });
 
-// Add a global error handler
-app.use((error, req, res, next) => {
-  res.status(500).json({
-    error: error.message || "Internal Server Error",
-    headers: {
-      "X-Action-Version": "2.1.3",
-      "X-Blockchain-Ids": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-    },
-  });
+// Add claim reward endpoint
+// GET /claim-reward - Show reward claim info
+app.get("/claim-reward", async (req, res) => {
+  try {
+    const { bidId } = req.query;
+    if (!bidId) {
+      return res.status(400).json({ message: "Missing ?bidId=..." });
+    }
+
+    const [bidPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("bid"), Buffer.from(bidId as string)],
+      program.programId
+    );
+
+    const bidAccount = await program.account.bid.fetch(bidPda);
+    const reward = (Number(bidAccount.rewardPerWinner) / 1_000_000_000).toFixed(
+      2
+    );
+
+    const actionMetadata = {
+      type: "action",
+      icon: "https://github.com/user-attachments/assets/6a5fd3c0-8e9c-4cfe-9d85-bcf177b2b4ba",
+      title: "🎉 Claim Your Reward",
+      description: `
+💰 Available Reward: ${reward} SOL
+
+This will claim your reward from the prediction market:
+"${bidAccount.content}"
+
+Winners who voted ${
+        bidAccount.outcome ? "YES" : "NO"
+      } can claim their share of the pool.
+`.trim(),
+      label: "Claim Reward",
+      links: {
+        actions: [
+          {
+            label: `🎉 Claim ${reward} SOL`,
+            href: `/claim-reward?bidId=${bidId}`,
+            style: {
+              primary: true,
+              color: "#14F195",
+            },
+          },
+        ],
+      },
+    };
+
+    res.status(200).json(actionMetadata);
+  } catch (error) {
+    res.status(500).json({
+      error: `GET /claim-reward Error: ${error.message}`,
+    });
+  }
+});
+
+app.post("/claim-reward", async (req, res) => {
+  try {
+    const { account } = req.body;
+    const { bidId } = req.query;
+
+    if (!account || !bidId) {
+      return res.status(400).json({
+        message: "Missing fields: account, bidId",
+      });
+    }
+
+    const [bidPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("bid"), Buffer.from(bidId as string)],
+      program.programId
+    );
+    const [userBidPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("user_bid"),
+        new PublicKey(account).toBuffer(),
+        Buffer.from(bidId as string),
+      ],
+      program.programId
+    );
+
+    const ix = await program.methods
+      .claimReward(bidId as string)
+      .accountsStrict({
+        bid: bidPda,
+        userBid: userBidPda,
+        claimer: new PublicKey(account),
+      })
+      .instruction();
+
+    const userPubkey = new PublicKey(account);
+    const { blockhash } = await connection.getLatestBlockhash();
+    const transaction = new Transaction({
+      feePayer: userPubkey,
+      recentBlockhash: blockhash,
+    });
+    transaction.add(ix);
+
+    const serializedTx = transaction.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    });
+    const base64Tx = serializedTx.toString("base64");
+
+    res.status(200).json({
+      transaction: base64Tx,
+      message: "Claiming your reward",
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: `POST /claim-reward Error: ${error.message}`,
+    });
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -397,5 +492,5 @@ app.use((error, req, res, next) => {
 // -----------------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Blink server listening on port ${PORT}`);
+  console.log(`Prediction market server listening on port ${PORT}`);
 });

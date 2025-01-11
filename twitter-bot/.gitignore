@@ -1,0 +1,7 @@
+node_modules
+.yarn
+.env
+.env.local
+.env
+.pnp.cjs
+.tsbuildinfo
