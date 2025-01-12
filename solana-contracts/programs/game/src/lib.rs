@@ -22,6 +22,7 @@ pub mod game {
         bid.created_at = clock.unix_timestamp;
         bid.yes_votes = 0;
         bid.no_votes = 0;
+        bid.total_amount = 0;
         bid.status = BidStatus::Open;
         bid.outcome = false;
 
@@ -46,6 +47,8 @@ pub mod game {
         );
         system_program::transfer(cpi_context, deposit_amount)?;
 
+        bid.total_amount += deposit_amount;
+
         user_bid.user = bidder.key();
         user_bid.bid_id = bid_id;
         user_bid.vote = vote;
@@ -59,12 +62,36 @@ pub mod game {
         Ok(())
     }
 
-    pub fn resolve_bid(ctx: Context<ResolveBid>, _bid_id: String, outcome: bool) -> Result<()> {
+    pub fn resolve_bid(ctx: Context<ResolveBid>, bid_id: String, outcome: bool) -> Result<()> {
         let bid = &mut ctx.accounts.bid;
         require!(bid.status == BidStatus::Open, BidError::BidClosed);
 
+        let winners = if outcome { bid.yes_votes } else { bid.no_votes };
+        require!(winners > 0, BidError::NoWinners);
+
+        // Calculate reward per winner
+        let reward_per_winner = bid.total_amount / winners;
+
         bid.status = BidStatus::Resolved;
         bid.outcome = outcome;
+        bid.reward_per_winner = reward_per_winner;
+
+        Ok(())
+    }
+
+    pub fn claim_reward(ctx: Context<ClaimReward>, bid_id: String) -> Result<()> {
+        let bid = &mut ctx.accounts.bid;
+        let user_bid = &ctx.accounts.user_bid;
+
+        require!(bid.status == BidStatus::Resolved, BidError::BidNotResolved);
+        require!(user_bid.vote == bid.outcome, BidError::NotAWinner);
+
+        let reward = bid.reward_per_winner;
+        require!(reward > 0, BidError::NoRewardAvailable);
+
+        // Transfer reward to winner
+        **bid.to_account_info().try_borrow_mut_lamports()? -= reward;
+        **ctx.accounts.claimer.try_borrow_mut_lamports()? += reward;
 
         Ok(())
     }
@@ -83,7 +110,7 @@ pub struct CreateBid<'info> {
     #[account(
         init,
         payer = creator,
-        space = 8 + 32 + 32 + 8 + 256 + 8 + 8 + 1 + 1,
+        space = 8 + 32 + 32 + 8 + 256 + 8 + 8 + 8 + 8 + 1 + 1,
         seeds = [b"bid", bid_id.as_bytes()],
         bump
     )]
@@ -124,6 +151,26 @@ pub struct ResolveBid<'info> {
     pub resolver: Signer<'info>,
 }
 
+#[derive(Accounts)]
+#[instruction(bid_id: String)]
+pub struct ClaimReward<'info> {
+    #[account(
+        mut,
+        seeds = [b"bid", bid_id.as_bytes()],
+        bump,
+        constraint = bid.id == bid_id @ BidError::InvalidBid
+    )]
+    pub bid: Account<'info, Bid>,
+    #[account(
+        seeds = [b"user_bid", claimer.key().as_ref(), bid_id.as_bytes()],
+        bump,
+        constraint = user_bid.user == claimer.key() @ BidError::Unauthorized
+    )]
+    pub user_bid: Account<'info, UserBid>,
+    #[account(mut)]
+    pub claimer: Signer<'info>,
+}
+
 #[account]
 pub struct Bid {
     pub id: String,
@@ -132,6 +179,8 @@ pub struct Bid {
     pub content: String,
     pub yes_votes: u64,
     pub no_votes: u64,
+    pub total_amount: u64,
+    pub reward_per_winner: u64,
     pub status: BidStatus,
     pub outcome: bool,
 }
@@ -155,6 +204,14 @@ pub enum BidError {
     Unauthorized,
     #[msg("Bid is closed")]
     BidClosed,
+    #[msg("Bid is not resolved yet")]
+    BidNotResolved,
     #[msg("Invalid bid ID")]
     InvalidBid,
+    #[msg("You are not a winner")]
+    NotAWinner,
+    #[msg("No winners in this bid")]
+    NoWinners,
+    #[msg("No reward available")]
+    NoRewardAvailable,
 }
