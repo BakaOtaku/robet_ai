@@ -135,7 +135,6 @@ async function scrapeAndDownloadTwitterStream(tweetUrl: string, outputName: stri
   });
 }
 
-
 async function downloadTwitterSpace(spaceUrl: string, outputName: string) {
   console.log(`Starting download of Twitter Space: ${spaceUrl}`);
 
