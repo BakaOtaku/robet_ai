@@ -26,12 +26,12 @@ const app = express();
 // ----------------------------- INITIALIZATION ----------------------------
 let tweetsCollection: Collection<Tweet>;
 
-// Initialize Twitter client with OAuth 1.0a User Context
+// Initialize Twitter client with OAuth 2.0
 const twitterClient = new TwitterApi({
-  appKey: process.env.TWITTER_API_KEY || '',
-  appSecret: process.env.TWITTER_API_SECRET || '',
-  accessToken: process.env.TWITTER_ACCESS_TOKEN || '',
-  accessSecret: process.env.TWITTER_ACCESS_SECRET || '',
+  appKey: process.env.TWITTER_API_KEY || "",
+  appSecret: process.env.TWITTER_API_SECRET || "",
+  accessToken: process.env.TWITTER_ACCESS_TOKEN || "",
+  accessSecret: process.env.TWITTER_ACCESS_SECRET || "",
 }).v2;
 
 // Validate Twitter credentials
@@ -71,7 +71,9 @@ async function initializeMongoDB() {
     const client = await MongoClient.connect(MONGODB_URI);
     const db = client.db(DB_NAME);
     tweetsCollection = db.collection<Tweet>(COLLECTION_NAME);
-    logInfo(`Connected to MongoDB - Database: ${DB_NAME}, Collection: ${COLLECTION_NAME}`);
+    logInfo(
+      `Connected to MongoDB - Database: ${DB_NAME}, Collection: ${COLLECTION_NAME}`
+    );
   } catch (error) {
     logError("MongoDB connection error:", error);
     process.exit(1);
@@ -82,7 +84,9 @@ async function initializeMongoDB() {
 // ----------------------------- FUNCTIONS ----------------------------
 async function createBetOnChain(tweet: Tweet) {
   if (tweet.blink_url) {
-    logInfo(`Bet already created for tweet ${tweet.tweet_id} but reply not sent`);
+    logInfo(
+      `Bet already created for tweet ${tweet.tweet_id} but reply not sent`
+    );
     return;
   }
   try {
@@ -124,22 +128,33 @@ async function replyToTweet(tweet: Tweet) {
   try {
     const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}\n\n#Prediction #Betting`;
 
-    const response = await twitterClient.tweet(replyText, {
-      reply: { in_reply_to_tweet_id: tweet.tweet_id }
-    });
+    // Add verification of permissions before attempting to tweet
+    const me = await twitterClient.me();
+    if (!me.data.protected) {
+      // Verify the account can post
+      const response = await twitterClient.tweet(replyText, {
+        reply: { in_reply_to_tweet_id: tweet.tweet_id },
+      });
 
-    if (response.data) {
-      logInfo(`Successfully replied to tweet ${tweet.tweet_id} with tweet ID: ${response.data.id}`);
-      await tweetsCollection.updateOne(
-        { tweet_id: tweet.tweet_id },
-        { $set: { is_replied: true } }
-      );
+      if (response.data) {
+        logInfo(
+          `Successfully replied to tweet ${tweet.tweet_id} with tweet ID: ${response.data.id}`
+        );
+        await tweetsCollection.updateOne(
+          { tweet_id: tweet.tweet_id },
+          { $set: { is_replied: true } }
+        );
+      }
     } else {
-      throw new Error("No response data from Twitter API");
+      throw new Error(
+        "Account doesn't have appropriate permissions to post tweets"
+      );
     }
   } catch (error: any) {
     if (error.code === 401) {
-      logError("Twitter authentication failed. Please check your API credentials.");
+      logError(
+        "Twitter authentication failed. Please check your API credentials."
+      );
     } else if (error.code === 403) {
       logError("Twitter API rate limit exceeded or duplicate tweet.");
     } else {
@@ -195,7 +210,7 @@ async function startServer() {
   try {
     await initializeMongoDB();
     await validateTwitterCredentials();
-    
+
     app.listen(PORT, () => {
       logInfo(`Server is running on port ${PORT}`);
     });
