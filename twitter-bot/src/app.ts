@@ -5,6 +5,7 @@ import express from "express";
 import { MongoClient, Collection } from "mongodb";
 import * as anchor from "@coral-xyz/anchor";
 import * as cron from "node-cron";
+import { v4 as uuidv4 } from "uuid";
 import { TwitterApi } from "twitter-api-v2";
 import { Game } from "../utils/game";
 import { Tweet, logError, logInfo } from "../utils";
@@ -90,14 +91,16 @@ async function createBetOnChain(tweet: Tweet) {
     return;
   }
   try {
-    const bidId = tweet.bet_id;
+    const betId = uuidv4().split("-")[0];
+    console.log(betId);
     const [bidPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("bid"), Buffer.from(bidId)],
+      [Buffer.from("bid"), Buffer.from(betId)],
       program.programId
     );
 
+    // Wait for the on-chain transaction to complete
     await program.methods
-      .createBid(bidId, tweet.question)
+      .createBid(betId, tweet.question)
       .accounts({
         // @ts-ignore
         bid: bidPda,
@@ -107,17 +110,27 @@ async function createBetOnChain(tweet: Tweet) {
       .signers([adminWallet])
       .rpc();
 
-    await tweetsCollection.updateOne(
+    // Verify the MongoDB update was successful
+    const updateResult = await tweetsCollection.updateOne(
       { tweet_id: tweet.tweet_id },
       {
         $set: {
-          blink_url: `https://dial.to/developer?url=https%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${bidId}&cluster=devnet`,
+          bet_id: betId,
+          blink_url: `https://dial.to/?action=solana-action%3Ahttps%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${betId}%26cluster%3Ddevnet`,
           updated_at: new Date(),
         },
       }
     );
 
-    logInfo(`Created bet on chain for tweet ${tweet.tweet_id}`);
+    if (updateResult.modifiedCount === 0) {
+      throw new Error(
+        `Failed to update tweet ${tweet.tweet_id} with bet ID ${betId}`
+      );
+    }
+
+    logInfo(
+      `Created bet on chain for tweet ${tweet.tweet_id} with bet ID ${betId}`
+    );
   } catch (error) {
     logError("Error creating bet on chain:", error);
     throw error;
@@ -125,8 +138,16 @@ async function createBetOnChain(tweet: Tweet) {
 }
 
 async function replyToTweet(tweet: Tweet) {
+  if (tweet.is_replied) {
+    logInfo(`Tweet ${tweet.tweet_id} already replied`);
+    return;
+  } else if (!tweet.blink_url) {
+    logInfo(`Tweet ${tweet.tweet_id} has no blink URL`);
+    return;
+  }
   try {
-    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}\n\n#Prediction #Betting`;
+    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}`;
+    console.log(replyText);
 
     // Add verification of permissions before attempting to tweet
     const me = await twitterClient.me();
