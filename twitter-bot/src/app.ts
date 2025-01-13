@@ -63,7 +63,7 @@ anchor.setProvider(provider);
 logInfo(`Admin public key: ${adminWallet.publicKey.toBase58()}`);
 // Initialize the program
 const program = new anchor.Program(
-  require("../../solana-contracts/target/idl/game.json"),
+  require("../utils/idl/game.json"),
   provider
 ) as anchor.Program<Game>;
 // Initialize mongodb connection with db and collection
