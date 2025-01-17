@@ -85,7 +85,7 @@ async function initializeMongoDB() {
 // -----------------------------------------------------------------
 // ----------------------------- FUNCTIONS ----------------------------
 async function createBetOnChain(tweet: Tweet) {
-  if (tweet.blink_url) {
+  if (tweet.bet_id) {
     logInfo(
       `Bet already created for tweet ${tweet.tweet_id} but reply not sent`
     );
@@ -159,7 +159,7 @@ async function replyToTweet(tweet: Tweet) {
     return;
   }
   try {
-    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}`;
+    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}\n\nXion Bet Link: https://t.me/robet_ai_bot/robet_ai`;
     console.log(replyText);
 
     // Add verification of permissions before attempting to tweet
