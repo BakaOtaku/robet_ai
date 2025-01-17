@@ -12,29 +12,30 @@ ROBET is a decentralized, AI-powered Prediction Markets platform designed to emp
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant R as Robet (AI on Twitter)
-    participant SC as Solana Contract
+    participant R as Robet (AI on Telegram)
+    participant XC as CosmWasm Contract (on Xion)
     participant AI as ChatGPT & Gemini
+    participant FG as Feegrant Module
 
-    U->>R: Tweet with broadcast link + question (e.g. "Will there be a goal?")
+    U->>R: Message on Telegram with broadcast link + question (e.g., "Will there be a goal?")
     R->>R: Analyze feasibility of creating a bet
     alt Feasible?
-        R->>SC: Deploy new bet contract on Solana
-        R->>U: Reply with Solana bet link
+        R->>XC: Deploy new bet contract on Xion
+        R->>U: Reply with Xion bet link
     else Not Feasible
         R->>U: Decline or provide reason
     end
-    U->>SC: Place bets using SOL
-    note over U,SC: Users place their wagers until the bet closes
+    U->>FG: Place bets using gasless transaction
+    FG->>XC: Forward bet placement to CosmWasm contract
+    note over U,XC: Users place their wagers until the bet closes
 
     par Event Ends
         R->>R: Retrieve relevant video/audio feed
-        R->>AI: Analyze outcome (e.g. "Was a goal scored?")
+        R->>AI: Analyze outcome (e.g., "Was a goal scored?")
         AI->>R: Provide resolution result
-        R->>SC: Resolve bet contract on Solana
-        SC->>U: Distribute payouts to winners
+        R->>XC: Resolve bet contract on Xion
+        XC->>U: Distribute payouts to winners via feegrant
     end
-
 ```
 
 ---
