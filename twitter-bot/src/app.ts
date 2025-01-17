@@ -5,6 +5,7 @@ import express from "express";
 import { MongoClient, Collection } from "mongodb";
 import * as anchor from "@coral-xyz/anchor";
 import * as cron from "node-cron";
+import { v4 as uuidv4 } from "uuid";
 import { TwitterApi } from "twitter-api-v2";
 import { Game } from "../utils/game";
 import { Tweet, logError, logInfo } from "../utils";
@@ -26,12 +27,12 @@ const app = express();
 // ----------------------------- INITIALIZATION ----------------------------
 let tweetsCollection: Collection<Tweet>;
 
-// Initialize Twitter client with OAuth 1.0a User Context
+// Initialize Twitter client with OAuth 2.0
 const twitterClient = new TwitterApi({
-  appKey: process.env.TWITTER_API_KEY || '',
-  appSecret: process.env.TWITTER_API_SECRET || '',
-  accessToken: process.env.TWITTER_ACCESS_TOKEN || '',
-  accessSecret: process.env.TWITTER_ACCESS_SECRET || '',
+  appKey: process.env.TWITTER_API_KEY || "",
+  appSecret: process.env.TWITTER_API_SECRET || "",
+  accessToken: process.env.TWITTER_ACCESS_TOKEN || "",
+  accessSecret: process.env.TWITTER_ACCESS_SECRET || "",
 }).v2;
 
 // Validate Twitter credentials
@@ -62,7 +63,7 @@ anchor.setProvider(provider);
 logInfo(`Admin public key: ${adminWallet.publicKey.toBase58()}`);
 // Initialize the program
 const program = new anchor.Program(
-  require("../../solana-contracts/target/idl/game.json"),
+  require("../utils/idl/game.json"),
   provider
 ) as anchor.Program<Game>;
 // Initialize mongodb connection with db and collection
@@ -71,7 +72,9 @@ async function initializeMongoDB() {
     const client = await MongoClient.connect(MONGODB_URI);
     const db = client.db(DB_NAME);
     tweetsCollection = db.collection<Tweet>(COLLECTION_NAME);
-    logInfo(`Connected to MongoDB - Database: ${DB_NAME}, Collection: ${COLLECTION_NAME}`);
+    logInfo(
+      `Connected to MongoDB - Database: ${DB_NAME}, Collection: ${COLLECTION_NAME}`
+    );
   } catch (error) {
     logError("MongoDB connection error:", error);
     process.exit(1);
@@ -82,18 +85,22 @@ async function initializeMongoDB() {
 // ----------------------------- FUNCTIONS ----------------------------
 async function createBetOnChain(tweet: Tweet) {
   if (tweet.blink_url) {
-    logInfo(`Bet already created for tweet ${tweet.tweet_id} but reply not sent`);
+    logInfo(
+      `Bet already created for tweet ${tweet.tweet_id} but reply not sent`
+    );
     return;
   }
   try {
-    const bidId = tweet.bet_id;
+    const betId = uuidv4().split("-")[0];
+    console.log(betId);
     const [bidPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("bid"), Buffer.from(bidId)],
+      [Buffer.from("bid"), Buffer.from(betId)],
       program.programId
     );
 
+    // Wait for the on-chain transaction to complete
     await program.methods
-      .createBid(bidId, tweet.question)
+      .createBid(betId, tweet.question)
       .accounts({
         // @ts-ignore
         bid: bidPda,
@@ -103,17 +110,27 @@ async function createBetOnChain(tweet: Tweet) {
       .signers([adminWallet])
       .rpc();
 
-    await tweetsCollection.updateOne(
+    // Verify the MongoDB update was successful
+    const updateResult = await tweetsCollection.updateOne(
       { tweet_id: tweet.tweet_id },
       {
         $set: {
-          blink_url: `https://dial.to/developer?url=https%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${bidId}&cluster=devnet`,
+          bet_id: betId,
+          blink_url: `https://dial.to/?action=solana-action%3Ahttps%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${betId}%26cluster%3Ddevnet`,
           updated_at: new Date(),
         },
       }
     );
 
-    logInfo(`Created bet on chain for tweet ${tweet.tweet_id}`);
+    if (updateResult.modifiedCount === 0) {
+      throw new Error(
+        `Failed to update tweet ${tweet.tweet_id} with bet ID ${betId}`
+      );
+    }
+
+    logInfo(
+      `Created bet on chain for tweet ${tweet.tweet_id} with bet ID ${betId}`
+    );
   } catch (error) {
     logError("Error creating bet on chain:", error);
     throw error;
@@ -121,25 +138,44 @@ async function createBetOnChain(tweet: Tweet) {
 }
 
 async function replyToTweet(tweet: Tweet) {
+  if (tweet.is_replied) {
+    logInfo(`Tweet ${tweet.tweet_id} already replied`);
+    return;
+  } else if (!tweet.blink_url) {
+    logInfo(`Tweet ${tweet.tweet_id} has no blink URL`);
+    return;
+  }
   try {
-    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}\n\n#Prediction #Betting`;
+    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}`;
+    console.log(replyText);
 
-    const response = await twitterClient.tweet(replyText, {
-      reply: { in_reply_to_tweet_id: tweet.tweet_id }
-    });
+    // Add verification of permissions before attempting to tweet
+    const me = await twitterClient.me();
+    if (!me.data.protected) {
+      // Verify the account can post
+      const response = await twitterClient.tweet(replyText, {
+        reply: { in_reply_to_tweet_id: tweet.tweet_id },
+      });
 
-    if (response.data) {
-      logInfo(`Successfully replied to tweet ${tweet.tweet_id} with tweet ID: ${response.data.id}`);
-      await tweetsCollection.updateOne(
-        { tweet_id: tweet.tweet_id },
-        { $set: { is_replied: true } }
-      );
+      if (response.data) {
+        logInfo(
+          `Successfully replied to tweet ${tweet.tweet_id} with tweet ID: ${response.data.id}`
+        );
+        await tweetsCollection.updateOne(
+          { tweet_id: tweet.tweet_id },
+          { $set: { is_replied: true } }
+        );
+      }
     } else {
-      throw new Error("No response data from Twitter API");
+      throw new Error(
+        "Account doesn't have appropriate permissions to post tweets"
+      );
     }
   } catch (error: any) {
     if (error.code === 401) {
-      logError("Twitter authentication failed. Please check your API credentials.");
+      logError(
+        "Twitter authentication failed. Please check your API credentials."
+      );
     } else if (error.code === 403) {
       logError("Twitter API rate limit exceeded or duplicate tweet.");
     } else {
@@ -195,7 +231,7 @@ async function startServer() {
   try {
     await initializeMongoDB();
     await validateTwitterCredentials();
-    
+
     app.listen(PORT, () => {
       logInfo(`Server is running on port ${PORT}`);
     });
