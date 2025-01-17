@@ -1,3 +1,6 @@
+Here's the updated README with all the relevant changes for the transition to Xion and the feegrant module:
+
+```markdown
 ### ROBET – Decentralized AI-Powered Prediction Markets Platform
 
 ---
@@ -6,6 +9,8 @@
 ROBET is a decentralized, AI-powered Prediction Markets platform designed to empower users to create and participate in bets on **any event**. Unlike traditional platforms like Polymarket, ROBET removes the restrictions of whitelisting and human resolvers, enabling **real-time, scalable, and transparent betting**.
 
 **Video:** [VimeoLink](https://vimeo.com/1041856045?share=copy) 
+
+---
 
 ## How we do it?
 
@@ -44,18 +49,22 @@ sequenceDiagram
 ### 1. **Seamless Bet Creation**  
 - Users create bets by sharing a broadcast link (e.g., sports matches, political speeches) with a question like:  
   *“Will a goal be scored in the next minute?”*  
-- ROBET analyzes the feasibility and deploys a **smart contract bet** on the **Solana blockchain**, providing users with a **Solana Blink** link for participation.  
+- ROBET analyzes the feasibility and deploys a **smart contract bet** on the **Xion blockchain**, providing users with a **Xion Bet** link for participation.  
 
-### 2. **AI-Powered Resolution**  
+### 2. **Gasless Transactions via Feegrant Module**  
+- ROBET integrates the **feegrant module** on Xion, allowing users to participate in bets without paying gas fees directly.  
+- This ensures seamless transactions and lowers entry barriers for users.
+
+### 3. **AI-Powered Resolution**  
 - ROBET retrieves video or audio feeds post-event and uses AI models like **ChatGPT** and **Gemini APIs** to determine outcomes.  
 - Winners receive their rewards instantly via blockchain, ensuring transparency and speed.  
 
-### 3. **Incentivized Bet Creators**  
+### 4. **Incentivized Bet Creators**  
 - ROBET rewards bet creators, introducing a **creator economy** for interactive, engaging bets.  
 - Content creators can add live bets during streams to enhance audience engagement.  
 
-### 4. **Decentralized and Scalable**  
-- Smart contracts ensure trustless execution and payout.  
+### 5. **Decentralized and Scalable**  
+- CosmWasm contracts ensure trustless execution and payout.  
 - AI handles a large volume of custom, short-term bets without delays.  
 
 ---
@@ -63,32 +72,32 @@ sequenceDiagram
 ## **How It Works**  
 
 ### **Step 1: Creating a Bet**  
-1. Tweet a broadcast link (e.g., a YouTube stream or sports match) with your question.  
+1. Send a tweet with a broadcast link (e.g., a YouTube stream or sports match) and your question.  
 2. ROBET evaluates the question’s feasibility in real time.  
-3. If valid, ROBET creates a **smart contract** and replies with a **Solana Blink** for user participation.  
+3. If valid, ROBET creates a **CosmWasm contract** on Xion and replies with a **Xion Bet** link for user participation.  
 
 ### **Step 2: Joining a Bet**  
-1. Participants click on the Solana Blink and join the bet using **SOL tokens**.  
+1. Participants click on the Xion Bet link and join the bet using gasless transactions via the **feegrant module**.  
 2. Funds are held in the smart contract until the event resolves.
 
 ### **Step 3: Resolving the Bet**  
 1. Once the event ends, ROBET retrieves relevant feeds.  
 2. AI (using **ChatGPT** and **Gemini APIs**) determines the result.  
-3. Winners are automatically awarded their share of the pot directly to their wallets.  
+3. Winners are automatically awarded their share of the pot directly to their wallets via the feegrant module.  
 
 ---
 
 ## **Technical Architecture**  
 
 ### **Blockchain Integration**  
-- **Platform**: Solana  
+- **Platform**: Xion (CosmWasm Contracts)  
 - **Features**:  
   - Smart contract deployment for bet execution.  
-  - **Solana Blink** links for seamless UX.  
-  - Fast, low-cost on-chain transactions.  
+  - Gasless transactions using the **feegrant module**.  
+  - Transparent, fast, and low-cost on-chain transactions.  
 - **Tools Used**:  
-  - **Anchor Framework** for smart contract development.  
-  - **Solana Web3.js SDK** for wallet interaction and transaction handling.  
+  - **CosmWasm SDK** for smart contract development.  
+  - **Feegrant Module** for gasless transaction support.  
 
 ### **AI Integration**  
 - **APIs Used**:  
@@ -103,16 +112,17 @@ sequenceDiagram
 ## **Key Benefits**  
 1. **Real-Time Bets**: Create and resolve bets instantly—no human delays.  
 2. **Broad Event Coverage**: From sports and politics to niche topics, ROBET supports it all.  
-3. **Fast Payouts**: Blockchain-powered payouts ensure instant rewards.  
-4. **Incentives for Creators**: Reward bet creators, fostering a creator-driven economy.  
-5. **Trustless and Transparent**: Decentralized execution ensures fairness and security.  
+3. **Gasless Transactions**: Feegrant module integration removes barriers for users.  
+4. **Fast Payouts**: Blockchain-powered payouts ensure instant rewards.  
+5. **Incentives for Creators**: Reward bet creators, fostering a creator-driven economy.  
+6. **Trustless and Transparent**: Decentralized execution ensures fairness and security.  
 
 ---
 
 ## **Usage**  
-1. Tweet your bet creation query, including a valid broadcast link.  
-2. Wait for ROBET’s response with a Solana Blink.  
-3. Join the bet using your Solana wallet.  
+1. Send your bet creation query on Telegram, including a valid broadcast link.  
+2. Wait for ROBET’s response with a Xion Bet link.  
+3. Join the bet using gasless transactions via the feegrant module.  
 4. Receive payouts if you win! 🎉  
 
 ---
@@ -132,6 +142,6 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 ## **Contact**  
 Have questions or ideas? Reach out to us!  
-- Twitter: [@robet_ai](https://twitter.com/robet_ai)  
+- Telegram: [@robet_ai](https://t.me/robet_ai)  
 
 Let’s build the future of prediction markets together! 🌟
