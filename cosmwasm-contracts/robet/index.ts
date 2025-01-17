@@ -22,7 +22,7 @@ type ExecuteMsg =
 
 // Match your "QueryMsg" structure from Rust
 type QueryMsg =
-  | { get_bet: { bet_id: number } };
+  | { GetBet: { bet_id: number } };
 
 // The BetDetail and BetInfo to match your query response
 interface BetDetail {
@@ -207,13 +207,13 @@ async function main() {
   // 7. Query: GetBet
   /////////////////////////////////////////////////
   const queryGetBet: QueryMsg = {
-    get_bet: { bet_id: parseInt(betId) },
+    GetBet: { bet_id: parseInt(betId) },
   };
 
   // Alternatively, you can use the raw query client if desired:
-  //   const readonlyClient = await CosmWasmClient.connect(RPC_ENDPOINT);
-  //   const betInfo = await readonlyClient.queryContractSmart(contractAddress, queryGetBet);
-  //
+    // const readonlyClient = await CosmWasmClient.connect(RPC_ENDPOINT);
+    // const betInfo = await readonlyClient.queryContractSmart(contractAddress, queryGetBet);
+  
   const betInfo = await client.queryContractSmart(
     contractAddress,
     queryGetBet
