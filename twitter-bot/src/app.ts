@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from "uuid";
 import { TwitterApi } from "twitter-api-v2";
 import { Game } from "../utils/game";
 import { Tweet, logError, logInfo } from "../utils";
+import axios from "axios";
 
 // -----------------------------------------------------------------
 // ----------------------------- CONSTANTS ----------------------------
@@ -98,7 +99,7 @@ async function createBetOnChain(tweet: Tweet) {
       program.programId
     );
 
-    // Wait for the on-chain transaction to complete
+    // Wait for the on-chain transaction to complete on Solana
     await program.methods
       .createBid(betId, tweet.question)
       .accounts({
@@ -110,12 +111,24 @@ async function createBetOnChain(tweet: Tweet) {
       .signers([adminWallet])
       .rpc();
 
+    // Create bet on Xion chain
+    const xionResponse = await axios.post("http://localhost:3111/create-bet", {
+      description: tweet.question,
+      endTime: Date.now() + 7 * 24 * 60 * 60 * 1000, // Example: 1 week from now
+    });
+
+    if (!xionResponse.data.success) {
+      throw new Error("Failed to create bet on Xion chain");
+    }
+
     // Verify the MongoDB update was successful
     const updateResult = await tweetsCollection.updateOne(
       { tweet_id: tweet.tweet_id },
       {
         $set: {
           bet_id: betId,
+          xion_bet_id: xionResponse.data.betId, // Store Xion bet ID
+          xion_transaction_hash: xionResponse.data.transactionHash, // Store Xion transaction hash
           blink_url: `https://dial.to/?action=solana-action%3Ahttps%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${betId}%26cluster%3Ddevnet`,
           updated_at: new Date(),
         },
@@ -129,7 +142,7 @@ async function createBetOnChain(tweet: Tweet) {
     }
 
     logInfo(
-      `Created bet on chain for tweet ${tweet.tweet_id} with bet ID ${betId}`
+      `Created bet on chain for tweet ${tweet.tweet_id} with bet ID ${betId} and Xion bet ID ${xionResponse.data.betId}`
     );
   } catch (error) {
     logError("Error creating bet on chain:", error);
