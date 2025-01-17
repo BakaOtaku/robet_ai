@@ -8,4 +8,4 @@ fn main() {
         execute: ExecuteMsg,
         query: QueryMsg,
     }
-}
+}   
