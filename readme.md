@@ -1,6 +1,3 @@
-Here's the updated README with all the relevant changes for the transition to Xion and the feegrant module:
-
-```markdown
 ### ROBET – Decentralized AI-Powered Prediction Markets Platform
 
 ---
