@@ -7,6 +7,11 @@ ROBET is a decentralized, AI-powered Prediction Markets platform designed to emp
 
 **Video:** [YouTube](https://youtu.be/CQuzQcCm8Wk) 
 
+**Links:**
+- [Telegram Bot](https://t.me/robet_ai_bot)
+- [Telegram Channel](https://t.me/robet_ai)
+- [Website](https://robet-ai.vercel.app/)
+
 ---
 
 ## How we do it?
