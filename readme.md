@@ -5,7 +5,7 @@
 ## **Introduction**  
 ROBET is a decentralized, AI-powered Prediction Markets platform designed to empower users to create and participate in bets on **any event**. Unlike traditional platforms like Polymarket, ROBET removes the restrictions of whitelisting and human resolvers, enabling **real-time, scalable, and transparent betting**.
 
-**Video:** [VimeoLink](https://vimeo.com/1041856045?share=copy) 
+**Video:** [YouTube](https://youtu.be/CQuzQcCm8Wk) 
 
 ---
 
@@ -117,8 +117,8 @@ sequenceDiagram
 ---
 
 ## **Usage**  
-1. Send your bet creation query on Telegram, including a valid broadcast link.  
-2. Wait for ROBET’s response with a Xion Bet link.  
+1. Send your bet creation query on Twitter, including a valid broadcast link.  
+2. Wait for ROBET’s response with a Xion Bet link on Telegram.  
 3. Join the bet using gasless transactions via the feegrant module.  
 4. Receive payouts if you win! 🎉  
 
