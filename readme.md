@@ -5,12 +5,13 @@
 ## **Introduction**  
 ROBET is a decentralized, AI-powered Prediction Markets platform designed to empower users to create and participate in bets on **any event**. Unlike traditional platforms like Polymarket, ROBET removes the restrictions of whitelisting and human resolvers, enabling **real-time, scalable, and transparent betting**.
 
-**Video:** [YouTube](https://youtu.be/CQuzQcCm8Wk) 
+  **Video:** [YouTube](https://youtu.be/CQuzQcCm8Wk) 
 
-**Links:**
-- [Telegram Bot](https://t.me/robet_ai_bot)
-- [Telegram Channel](https://t.me/robet_ai)
-- [Website](https://robet-ai.vercel.app/)
+  **Links:**
+  - [Xion Testnet Contract](https://explorer.burnt.com/xion-testnet-1/account/xion13vucjv0hu9srmseqygrdatuxqd8ek69xxx0pv2p6ntv54w3pqxgsmkl5nk)
+  - [Telegram Bot](https://t.me/robet_ai_bot)
+  - [Telegram Channel](https://t.me/robet_ai)
+  - [Website](https://robet-ai.vercel.app/)
 
 ---
 
