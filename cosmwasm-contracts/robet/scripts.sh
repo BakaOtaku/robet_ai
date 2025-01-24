@@ -15,7 +15,7 @@
 {"contracts":["xion1j5lt8vukg0sdc6g6t4ds45s5j5nyneuw9n82u7wx2xylpah8wvaqgavly0"],"pagination":{"next_key":null,"total":"0"}}
 
 # Create a bet
-curl -X POST http://localhost:3000/create-bet \
+curl -X POST http://localhost:3111/create-bet \
   -H "Content-Type: application/json" \
   -d '{"description": "Will BTC reach $100k by end of 2024?", "endTime": 1703980800000}'
 

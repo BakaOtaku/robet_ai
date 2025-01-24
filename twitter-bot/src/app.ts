@@ -160,7 +160,7 @@ async function replyToTweet(tweet: Tweet) {
     return;
   }
   try {
-    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${read_db.blink_url}\n\nXion Bet Link: https://t.me/robet_ai_bot/robet_ai`;
+    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${read_db.blink_url}`;
     console.log(replyText);
 
     // Add verification of permissions before attempting to tweet
