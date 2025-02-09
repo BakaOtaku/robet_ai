@@ -15,10 +15,12 @@
     "@cosmjs/proto-signing": "^0.33.0",
     "@cosmjs/stargate": "^0.33.0",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "readline-sync": "^1.4.10"
   },
   "devDependencies": {
     "@types/express": "^4.17.17",
+    "prompt-sync": "^4.2.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"
   }
