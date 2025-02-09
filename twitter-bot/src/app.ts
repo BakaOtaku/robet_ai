@@ -151,15 +151,16 @@ async function createBetOnChain(tweet: Tweet) {
 }
 
 async function replyToTweet(tweet: Tweet) {
-  if (tweet.is_replied) {
+  const read_db = await tweetsCollection.findOne({ tweet_id: tweet.tweet_id });
+  if (read_db?.is_replied) {
     logInfo(`Tweet ${tweet.tweet_id} already replied`);
     return;
-  } else if (!tweet.blink_url) {
+  } else if (!read_db?.blink_url) {
     logInfo(`Tweet ${tweet.tweet_id} has no blink URL`);
     return;
   }
   try {
-    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${tweet.blink_url}\n\nXion Bet Link: https://t.me/robet_ai_bot/robet_ai`;
+    const replyText = `🎲 Your prediction has been turned into a bet!\n\nJoin and place your bets at ${read_db.blink_url}`;
     console.log(replyText);
 
     // Add verification of permissions before attempting to tweet
