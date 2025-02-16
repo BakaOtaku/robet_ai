@@ -44,6 +44,17 @@ marketRouter.get("/trades", async (req: any, res: any) => {
   }
 });
 
+// GET /api/market/active - Get all active markets
+marketRouter.get("/active", async (req: any, res: any) => {
+  try {
+    // Query the Market model for markets that are not settled
+    const activeMarkets = await Market.find({ settled: false });
+    return res.json({ success: true, markets: activeMarkets });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, error: error });
+  }
+});
 
 // POST /api/settle - Settle a market
 marketRouter.post("/settle", async (req: any, res: any) => {
@@ -62,6 +73,23 @@ marketRouter.post("/settle", async (req: any, res: any) => {
     // market.settled = true;
     // await market.save();
     await settleMarket(marketId, outcome);
+
+    return res.json({ success: true, market });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, error: error });
+  }
+});
+
+// GET /api/market/:marketId - Get a specific market by marketId
+marketRouter.get("/:marketId", async (req: any, res: any) => {
+  try {
+    const { marketId } = req.params;
+    const market = await Market.findOne({ marketId });
+
+    if (!market) {
+      return res.status(404).json({ success: false, error: "Market not found" });
+    }
 
     return res.json({ success: true, market });
   } catch (error) {

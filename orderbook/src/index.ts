@@ -3,6 +3,7 @@ import express from "express";
 import mongoose from "mongoose";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
+import cors from "cors";
 
 // Import API routes
 import marketRouter from "./routes/market";
@@ -18,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(bodyParser.json());
-
+app.use(cors());
 // Routes
 app.use("/api/market", marketRouter);
 app.use("/api/order", orderRouter);
