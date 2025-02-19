@@ -15,8 +15,9 @@ export interface IUserMarketBalance {
 }
 
 export interface IUserBalance extends Document {
-  userId: string;                   // e.g. Solana pubkey
-  availableUSD: number;             // how much $ the user can freely use
+  userId: string;       // e.g. wallet address (Solana/EVM/Cosmos)
+  chainId: string;      // blockchain identifier (solana, evm, cosmos, etc)
+  availableUSD: number; // how much $ the user can freely use
   markets: IUserMarketBalance[];    // array of per-market balances
 }
 
@@ -28,9 +29,13 @@ const UserMarketBalanceSchema = new Schema<IUserMarketBalance>({
 }, { _id: false });
 
 const UserBalanceSchema = new Schema<IUserBalance>({
-  userId: { type: String, required: true, unique: true },
+  userId: { type: String, required: true },
+  chainId: { type: String, required: true },
   availableUSD: { type: Number, default: 0 },
   markets: { type: [UserMarketBalanceSchema], default: [] },
 });
+
+// Composite unique index so that a wallet address on a given chain is unique.
+UserBalanceSchema.index({ userId: 1, chainId: 1 }, { unique: true });
 
 export const UserBalance = model<IUserBalance>("UserBalance", UserBalanceSchema);

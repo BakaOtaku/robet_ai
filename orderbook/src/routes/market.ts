@@ -69,12 +69,13 @@ marketRouter.post("/settle", async (req: any, res: any) => {
       return res.status(404).json({ success: false, error: "Market not found" });
     }
 
-    // market.outcome = outcome;
-    // market.settled = true;
-    // await market.save();
+    // Call the settlement service to update the market and user balances.
     await settleMarket(marketId, outcome);
 
-    return res.json({ success: true, market });
+    // Re-fetch the updated market from the database.
+    const updatedMarket = await Market.findOne({ marketId });
+
+    return res.json({ success: true, market: updatedMarket });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, error: error });

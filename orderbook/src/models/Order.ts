@@ -1,12 +1,14 @@
 import { Schema, model, Document } from "mongoose";
 
 export type OrderSide = "BUY" | "SELL";
+export type OrderTokenType = "YES" | "NO";
 
 export interface IOrder extends Document {
   orderId: string;
   marketId: string;
   userId: string;        // e.g. Solana pubkey
   side: OrderSide;       // BUY or SELL (for the YES token)
+  tokenType: OrderTokenType;
   price: number;         // 0 <= price <= 1
   quantity: number;      // shares
   filledQuantity: number;
@@ -19,6 +21,7 @@ const OrderSchema = new Schema<IOrder>({
   marketId: { type: String, required: true },
   userId: { type: String, required: true },
   side: { type: String, enum: ["BUY", "SELL"], required: true },
+  tokenType: { type: String, enum: ["YES", "NO"], default: "YES" },
   price: { type: Number, required: true },
   quantity: { type: Number, required: true },
   filledQuantity: { type: Number, default: 0 },
