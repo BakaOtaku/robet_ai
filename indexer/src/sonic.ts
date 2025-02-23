@@ -56,7 +56,9 @@ export async function getDepositEvents(
   toBlock: bigint
 ): Promise<DepositEvent[]> {
   try {
-    console.log(`[${new Date().toISOString()}] Scanning blocks ${fromBlock} to ${toBlock}`);
+    console.log(
+      `[${new Date().toISOString()}] Scanning blocks ${fromBlock} to ${toBlock}`
+    );
 
     const rawLogs = await client.getLogs({
       address: CONTRACT_ADDRESS as Address,
@@ -66,7 +68,9 @@ export async function getDepositEvents(
     });
 
     if (rawLogs.length > 0) {
-      console.log(`[${new Date().toISOString()}] Found ${rawLogs.length} deposit events`);
+      console.log(
+        `[${new Date().toISOString()}] Found ${rawLogs.length} deposit events`
+      );
     }
 
     return rawLogs.map((log) => {
@@ -85,7 +89,10 @@ export async function getDepositEvents(
       };
     });
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error fetching deposit events:`, error);
+    console.error(
+      `[${new Date().toISOString()}] Error fetching deposit events:`,
+      error
+    );
     return [];
   }
 }
@@ -128,46 +135,59 @@ export async function checkAndUpdateBalances(
     try {
       const query = {
         userId: event.user.toLowerCase(),
-        token: event.token.toLowerCase(),
+        chainId: "sonicBlazeTestnet",
       };
+
+      // Get on-chain balance
+      const onChainBalance =
+        (await contract.read.getUserBalance([
+          event.user as Address,
+          event.token as Address,
+        ])) || BigInt(0);
+
+      // Convert amount from wei to USD (assuming 1 token = 1 USD for now)
+      const balanceInUSD = Number(onChainBalance) / Number(10) ** Number(18);
+      console.log("On-chain balance in USD", balanceInUSD);
+
       const existing = await collection.findOne(query);
-      const newBalance = event.amount.toString();
 
       if (!existing) {
         const newDoc = {
           userId: event.user.toLowerCase(),
-          token: event.token.toLowerCase(),
-          availableCollateral: newBalance,
+          chainId: "sonicBlazeTestnet",
+          availableCollateral: onChainBalance.toString(),
           lockedCollateral: "0",
           yesTokens: 0,
           noTokens: 0,
+          availableUSD: balanceInUSD.toString(),
           lastUpdated: new Date(),
-          lastTxHash: event.txHash,
-          blockNumber: event.blockNumber.toString(),
         };
         await collection.insertOne(newDoc);
         console.log(
-          `[${new Date().toISOString()}] New deposit: User=${event.user} Token=${event.token} Amount=${newBalance}`
+          `[${new Date().toISOString()}] New user balance: User=${
+            event.user
+          } USD=${balanceInUSD}`
         );
       } else {
-        await collection.updateOne(
-          query,
-          {
-            $set: {
-              availableCollateral: newBalance,
-              lastUpdated: new Date(),
-              lastTxHash: event.txHash,
-              blockNumber: event.blockNumber.toString(),
-            },
-          }
-        );
+        // Update with on-chain balance
+        await collection.updateOne(query, {
+          $set: {
+            availableCollateral: onChainBalance.toString(),
+            availableUSD: balanceInUSD.toString(),
+            lastUpdated: new Date(),
+          },
+        });
         console.log(
-          `[${new Date().toISOString()}] Updated deposit: User=${event.user} Token=${event.token} Amount=${newBalance}`
+          `[${new Date().toISOString()}] Updated user balance: User=${
+            event.user
+          } USD=${balanceInUSD}`
         );
       }
     } catch (err) {
       console.error(
-        `[${new Date().toISOString()}] Failed to process deposit for user ${event.user}:`,
+        `[${new Date().toISOString()}] Failed to process deposit for user ${
+          event.user
+        }:`,
         err
       );
     }

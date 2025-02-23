@@ -3,7 +3,6 @@ import { UserBalance } from "../models/UserBalance";
 
 const userRouter = Router();
 
-
 /**
  * GET /api/users/:userId
  * Retrieve a user's balance.
@@ -13,19 +12,24 @@ userRouter.get("/:userId", async (req: any, res: any) => {
   try {
     const { userId } = req.params;
     const { chainId } = req.query;
-    
     if (!chainId) {
-      return res.status(400).json({ success: false, error: "chainId query parameter is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "chainId query parameter is required" });
     }
-    
-    const userBalance = await UserBalance.findOne({ userId, chainId });
+
+    const userBalance = await UserBalance.findOne({
+      userId: userId.toLowerCase(),
+    });
     if (!userBalance) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
     return res.json({ success: true, balance: userBalance });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ success: false, error: (error as Error).message });
+    return res
+      .status(500)
+      .json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -38,15 +42,21 @@ userRouter.get("/:userId", async (req: any, res: any) => {
 userRouter.post("/deposit", async (req: any, res: any) => {
   try {
     const { userId, chainId, amount } = req.body;
-    
+
     if (!userId || !chainId || amount === undefined) {
-      return res.status(400).json({ success: false, error: "userId, chainId, and amount are required" });
+      return res.status(400).json({
+        success: false,
+        error: "userId, chainId, and amount are required",
+      });
     }
-    
+
     if (amount <= 0) {
-      return res.status(400).json({ success: false, error: "Deposit amount must be greater than 0" });
+      return res.status(400).json({
+        success: false,
+        error: "Deposit amount must be greater than 0",
+      });
     }
-    
+
     let userBalance = await UserBalance.findOne({ userId, chainId });
     if (!userBalance) {
       // Create a new user record if one does not exist
@@ -54,18 +64,20 @@ userRouter.post("/deposit", async (req: any, res: any) => {
         userId,
         chainId,
         availableUSD: amount,
-        markets: []
+        markets: [],
       });
     } else {
       // Add deposit amount to the existing user's available funds
       userBalance.availableUSD += amount;
       await userBalance.save();
     }
-    
+
     return res.json({ success: true, balance: userBalance });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ success: false, error: (error as Error).message });
+    return res
+      .status(500)
+      .json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -77,32 +89,42 @@ userRouter.post("/deposit", async (req: any, res: any) => {
 userRouter.post("/withdraw", async (req: any, res: any) => {
   try {
     const { userId, chainId, amount } = req.body;
-    
+
     if (!userId || !chainId || amount === undefined) {
-      return res.status(400).json({ success: false, error: "userId, chainId, and amount are required" });
+      return res.status(400).json({
+        success: false,
+        error: "userId, chainId, and amount are required",
+      });
     }
-    
+
     if (amount <= 0) {
-      return res.status(400).json({ success: false, error: "Withdrawal amount must be greater than 0" });
+      return res.status(400).json({
+        success: false,
+        error: "Withdrawal amount must be greater than 0",
+      });
     }
-    
+
     const userBalance = await UserBalance.findOne({ userId, chainId });
     if (!userBalance) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
-    
+
     if (userBalance.availableUSD < amount) {
-      return res.status(400).json({ success: false, error: "Insufficient funds" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Insufficient funds" });
     }
-    
+
     userBalance.availableUSD -= amount;
     await userBalance.save();
-    
+
     return res.json({ success: true, balance: userBalance });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ success: false, error: (error as Error).message });
+    return res
+      .status(500)
+      .json({ success: false, error: (error as Error).message });
   }
 });
 
-export default userRouter; 
+export default userRouter;

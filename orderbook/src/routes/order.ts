@@ -12,15 +12,21 @@ const orderRouter = Router();
 orderRouter.post("/", verifySignature, async (req: any, res: any) => {
   try {
     // Read parameters including tokenType (defaults to "YES")
-    const { marketId, userId, side, price, quantity } = req.body;
+    let { marketId, userId, side, price, quantity } = req.body;
     const tokenType: OrderTokenType = req.body.tokenType || "YES";
+
+    userId = userId.toLowerCase();
 
     // Basic checks
     if (price < 0 || price > 1) {
-      return res.status(400).json({ success: false, error: "Price must be between 0 and 1." });
+      return res
+        .status(400)
+        .json({ success: false, error: "Price must be between 0 and 1." });
     }
     if (quantity <= 0) {
-      return res.status(400).json({ success: false, error: "Quantity must be > 0." });
+      return res
+        .status(400)
+        .json({ success: false, error: "Quantity must be > 0." });
     }
 
     // Load user balance
@@ -30,7 +36,9 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
     }
 
     // Attempt to find or create userMarketBalance record for this market
-    let marketBalance = userBalance.markets.find(m => m.marketId === marketId);
+    let marketBalance = userBalance.markets.find(
+      (m) => m.marketId === marketId
+    );
     if (!marketBalance) {
       // If user hasn't interacted with this market yet, create an entry
       marketBalance = {
@@ -56,7 +64,7 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
           if (userBalance.availableUSD < requiredCollateral) {
             return res.status(400).json({
               success: false,
-              error: `Insufficient funds to short ${shortAmount} tokens. Requires $${requiredCollateral}.`
+              error: `Insufficient funds to short ${shortAmount} tokens. Requires $${requiredCollateral}.`,
             });
           }
           // Lock collateral for short position.
@@ -68,7 +76,7 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
         if (marketBalance.noTokens < quantity) {
           return res.status(400).json({
             success: false,
-            error: `Insufficient NO‑token balance to sell ${quantity} tokens.`
+            error: `Insufficient NO‑token balance to sell ${quantity} tokens.`,
           });
         }
       }
@@ -88,13 +96,39 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
       price,
       quantity,
       filledQuantity: 0,
-      status: "OPEN"
+      status: "OPEN",
     });
+    console.log("newOrder", newOrder);
 
     // Attempt to match the order
     await matchOrders(newOrder);
 
+    console.log("newOrder", newOrder);
+
     return res.json({ success: true, order: newOrder });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, error: error });
+  }
+});
+
+// GET /api/order - Get orders for a market
+orderRouter.get("/", async (req: any, res: any) => {
+  try {
+    const { marketId } = req.query;
+    if (!marketId) {
+      return res
+        .status(400)
+        .json({ success: false, error: "marketId is required" });
+    }
+
+    // Query the Order model for orders with this marketId
+    const orders = await Order.find({
+      marketId,
+      status: { $in: ["OPEN", "PARTIAL"] }, // Only return active orders
+    }).sort({ createdAt: -1 }); // Sort by newest first
+
+    return res.json({ success: true, orders });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, error: error });
