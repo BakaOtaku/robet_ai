@@ -271,3 +271,56 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::GetConfig {} => to_json_binary(&CONFIG.load(deps.storage)?),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{coins, from_binary, Addr, BankMsg, SubMsg};
+
+    #[test]
+    fn test_native_token_detection() {
+        println!("testing native token detection with uxion");
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        
+        // Set up contract config
+        let config = Config {
+            owner: Addr::unchecked("owner"),
+            admin_wallet: Addr::unchecked("admin_wallet"),
+            whitelist: vec![],
+        };
+        CONFIG.save(deps.as_mut().storage, &config).unwrap();
+        
+        // Test "uxion" as token_address
+        let amount = Uint128::new(1000);
+        let info = mock_info("sender", &coins(1000, "uxion"));
+        
+        let result = execute_deposit_token(
+            deps.as_mut(),
+            env.clone(),
+            info,
+            "uxion".to_string(),
+            amount,
+        ).unwrap();
+        
+        // Verify it was treated as a native token by checking for a bank message
+        assert_eq!(result.messages.len(), 1);
+        match &result.messages[0].msg {
+            CosmosMsg::Bank(BankMsg::Send { to_address, amount: send_amount }) => {
+                assert_eq!(to_address, "admin_wallet");
+                assert_eq!(send_amount.len(), 1);
+                assert_eq!(send_amount[0].denom, "uxion");
+                assert_eq!(send_amount[0].amount, amount);
+            },
+            _ => panic!("Expected Bank message, got something else"),
+        }
+        
+        // Check event attributes that indicate it was treated as native
+        let deposit_event = result.events.iter().find(|e| e.ty == "deposit_token").unwrap();
+        let token_type = deposit_event.attributes.iter()
+            .find(|attr| attr.key == "token_type")
+            .unwrap();
+        assert_eq!(token_type.value, "native");
+    }
+}
