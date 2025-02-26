@@ -6,13 +6,16 @@
   "scripts": {
     "start": "ts-node src/app.ts",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:xion": "ts-node utils/xiontest.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
+    "@cosmjs/cosmwasm-stargate": "^0.33.0",
+    "@cosmjs/stargate": "^0.33.0",
     "@types/express": "^5.0.0",
     "@types/uuid": "^10.0.0",
     "cors": "^2.8.5",

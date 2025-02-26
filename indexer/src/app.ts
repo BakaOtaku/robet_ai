@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { MongoClient } from "mongodb";
 import { client, getDepositEvents, checkAndUpdateBalances } from "./sonic";
+import { checkAndUpdateXionBalances } from "./xion";
 
 const app = express();
 const port = process.env.PORT || 4560;
@@ -26,13 +27,17 @@ app.get("/balance/:address", async (req, res) => {
 // Function to poll for new deposits
 async function pollDeposits() {
   try {
+    // Poll Sonic deposits
     const currentBlock = await client.getBlockNumber();
     const fromBlock = currentBlock - BigInt(1000);
 
-    const events = await getDepositEvents(fromBlock, currentBlock);
-    if (events.length > 0) {
-      await checkAndUpdateBalances(events, collection);
-    }
+    // const events = await getDepositEvents(fromBlock, currentBlock);
+    // if (events.length > 0) {
+    //   await checkAndUpdateBalances(events, collection);
+    // }
+
+    // Poll Xion deposits
+    await checkAndUpdateXionBalances(collection);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Polling error:`, error);
   }
