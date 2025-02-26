@@ -67,10 +67,12 @@ export function verifySignature(req: Request, res: Response, next: NextFunction)
       });
       return;
     }
+  } else if (chainId === "sonicBlazeTestnet") {
+    // TODO: Implement Sonic Blaze signature verification.
   } else {
     // Implement or bypass verification for other chains as needed.
     console.log(`Chain ${chainId} does not have a Solana signature verification mechanism implemented.`);
   }
 
   next();
-} 
+}
