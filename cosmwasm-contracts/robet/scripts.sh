@@ -90,8 +90,8 @@ echo "Checking if token was added to whitelist..."
 # 4. Test deposit of native tokens
 echo "Testing native token deposit..."
 ~/Desktop/garage/xion/build/xiond tx wasm execute $CONTRACT_ADDR \
-  '{"deposit_token":{"token_address":"'$DENOM'","amount":"1000000"}}' \
-  --amount 1000000$DENOM \
+  '{"deposit_token":{"token_address":"'$DENOM'","amount":"10000"}}' \
+  --amount 10000$DENOM \
   --from $WALLET \
   --chain-id $CHAIN_ID \
   --gas-prices $GAS_PRICES \
