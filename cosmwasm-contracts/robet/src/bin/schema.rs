@@ -1,6 +1,6 @@
 use cosmwasm_schema::write_api;
 
-use robet::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use robet::contract::{ExecuteMsg, InstantiateMsg, QueryMsg};
 
 fn main() {
     write_api! {

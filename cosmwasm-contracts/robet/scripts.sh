@@ -9,11 +9,11 @@
 --chain-id xion-testnet-1 \
 -y
 
+~/Desktop/garage/xion/build/xiond tx wasm store artifacts/robet.wasm --from test --chain-id xion-testnet-1 --gas-prices 0.025uxion --gas auto --gas-adjustment 1.3 --node https://rpc.xion-testnet-1.burnt.com:443 -y
+~/Desktop/garage/xion/build/xiond tx wasm instantiate 2097 '{"admin_wallet":"xion14vu4xu668pu7pavxtpr84mp5ywzh4y2wu72yhl"}' --from test --label "robet_v1.0.0" --gas auto --gas-adjustment 1.3 --node https://rpc.xion-testnet-1.burnt.com:443 -y --admin xion14vu4xu668pu7pavxtpr84mp5ywzh4y2wu72yhl --chain-id xion-testnet-1
+~/Desktop/garage/xion/build/xiond q tx 56271F5524B615D091159C6A5F4D521FC9C559135D05E9018FE95A49C3B79AAD --node https://rpc.xion-testnet-1.burnt.com:443
 
-./xiond tx wasm instantiate 1848
-./xiond q wasm list-contract-by-code 1848 -o json --node https://rpc.xion-testnet-1.burnt.com:443
-{"contracts":["xion1j5lt8vukg0sdc6g6t4ds45s5j5nyneuw9n82u7wx2xylpah8wvaqgavly0"],"pagination":{"next_key":null,"total":"0"}}
-
+address=xion1n4drepnpj8qhme9qrr0kpv7490yf6ugqq4wj0ax7l0ljp3gfjfpq5elvys
 # Create a bet
 curl -X POST http://localhost:3111/create-bet \
   -H "Content-Type: application/json" \
