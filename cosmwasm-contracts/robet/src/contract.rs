@@ -44,7 +44,8 @@ pub enum ExecuteMsg {
     },
     /// Deposits tokens from the user to the admin wallet.
     ///
-    /// Note: This uses a CW20 `TransferFrom` call; the user must have granted this contract an allowance.
+    /// For CW20 tokens: Provide token_address (contract address) and amount (requires allowance).
+    /// For native tokens: Provide token_address (denom string) and amount, and send with the transaction.
     DepositToken {
         token_address: String,
         amount: Uint128,
@@ -102,7 +103,7 @@ pub fn execute(
         ExecuteMsg::DepositToken {
             token_address,
             amount,
-        } => execute_deposit_token(deps, env, info, token_address, amount.into()),
+        } => execute_deposit_token(deps, env, info, token_address, amount),
         ExecuteMsg::UpdateConfig { new_admin_wallet } => {
             execute_update_config(deps, info, new_admin_wallet)
         }
@@ -173,8 +174,9 @@ pub fn execute_update_config(
 
 /// Deposits tokens from the user into the admin wallet's account.
 ///
-/// This function checks that the token is whitelisted and then constructs a CW20
-/// `TransferFrom` message. (The user must have approved an allowance for this contract.)
+/// This function handles both CW20 tokens and native tokens:
+/// - For CW20 tokens: Provide token_address (contract address) and amount (requires allowance)
+/// - For native tokens: Provide token_address (denom string) and amount, with matching funds sent
 pub fn execute_deposit_token(
     deps: DepsMut,
     env: Env,
@@ -184,37 +186,83 @@ pub fn execute_deposit_token(
 ) -> StdResult<Response> {
     // Load the stored config.
     let config = CONFIG.load(deps.storage)?;
-    let token_addr = deps.api.addr_validate(&token_address)?;
-    // Check if the token is whitelisted.
-    if !config.whitelist.contains(&token_addr) {
-        return Err(StdError::generic_err("Token not whitelisted"));
-    }
-
-    // Construct the CW20 TransferFrom message.
-    // Note: This requires that the user has given this contract sufficient allowance.
-    let transfer_from_msg = cw20_base::msg::ExecuteMsg::TransferFrom {
-        owner: info.sender.to_string(),
-        recipient: config.admin_wallet.to_string(),
-        amount,
-    };
-    let exec_transfer = WasmMsg::Execute {
-        contract_addr: token_addr.to_string(),
-        msg: to_json_binary(&transfer_from_msg)?,
-        funds: vec![],
-    };
-
-    // Create string values before using them in the vector
-    let sender_string = info.sender.to_string();
-    let amount_string = amount.to_string();
-    let timestamp_string = env.block.time.seconds().to_string();
     
-    Ok(Response::new()
-        .add_message(CosmosMsg::Wasm(exec_transfer))
-        .add_event(Event::new("deposit_token")
-            .add_attribute("user", sender_string)
-            .add_attribute("amount", amount_string)
-            .add_attribute("token_address", token_address)
-            .add_attribute("timestamp", timestamp_string)))
+    // Check if the token_address is a denom (starts with a specific pattern like "u")
+    // This is a simple heuristic - adjust based on your chain's denom patterns
+    if token_address.starts_with("u") || token_address.contains("ibc/") {
+        // Handle native tokens
+        
+        // Find the specified denom in the sent funds
+        let sent_amount = info
+            .funds
+            .iter()
+            .find(|coin| coin.denom == token_address)
+            .map(|coin| coin.amount)
+            .unwrap_or(Uint128::zero());
+        
+        // Verify the sent amount matches the specified amount
+        if sent_amount != amount {
+            return Err(StdError::generic_err(format!(
+                "Sent amount ({}) doesn't match specified amount ({}) for denom {}",
+                sent_amount, amount, token_address
+            )));
+        }
+        
+        if sent_amount.is_zero() {
+            return Err(StdError::generic_err(format!(
+                "No tokens with denom {} were sent with transaction", 
+                token_address
+            )));
+        }
+        
+        // Create a bank send message for just this denom
+        let bank_msg = CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
+            to_address: config.admin_wallet.to_string(),
+            amount: vec![cosmwasm_std::Coin {
+                denom: token_address.clone(),
+                amount,
+            }],
+        });
+        
+        // Create response with the bank send message and event
+        Ok(Response::new()
+            .add_message(bank_msg)
+            .add_event(Event::new("deposit_token")
+                .add_attribute("user", info.sender.to_string())
+                .add_attribute("amount", amount.to_string())
+                .add_attribute("token_address", token_address)
+                .add_attribute("token_type", "native")
+                .add_attribute("timestamp", env.block.time.seconds().to_string())))
+    } else {
+        // Handle CW20 tokens
+        let token_addr = deps.api.addr_validate(&token_address)?;
+        
+        // Check if the token is whitelisted.
+        if !config.whitelist.contains(&token_addr) {
+            return Err(StdError::generic_err("Token not whitelisted"));
+        }
+
+        // Construct the CW20 TransferFrom message.
+        let transfer_from_msg = cw20_base::msg::ExecuteMsg::TransferFrom {
+            owner: info.sender.to_string(),
+            recipient: config.admin_wallet.to_string(),
+            amount,
+        };
+        let exec_transfer = WasmMsg::Execute {
+            contract_addr: token_addr.to_string(),
+            msg: to_json_binary(&transfer_from_msg)?,
+            funds: vec![],
+        };
+        
+        Ok(Response::new()
+            .add_message(CosmosMsg::Wasm(exec_transfer))
+            .add_event(Event::new("deposit_token")
+                .add_attribute("user", info.sender.to_string())
+                .add_attribute("amount", amount.to_string())
+                .add_attribute("token_address", token_addr.to_string())
+                .add_attribute("token_type", "cw20")
+                .add_attribute("timestamp", env.block.time.seconds().to_string())))
+    }
 }
 
 #[entry_point]
