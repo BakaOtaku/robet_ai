@@ -162,6 +162,44 @@ app.get("/state", (req, res) => {
   });
 });
 
+// Test endpoint for authz transactions
+// @ts-ignore
+app.get("/test/authz/:hash", async (req, res) => {
+  const txHash = req.params.hash.toUpperCase();
+  serverLogger.info(`Testing authz transaction: ${txHash}`);
+
+  try {
+    // First query transaction details
+    const txData = await queryTransactionDetails(txHash);
+    
+    if (!txData) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
+    }
+    
+    // Process the transaction with the data
+    const result = await processTransaction(txData, txHash, collection);
+    
+    res.json({
+      success: result.success,
+      message: result.message,
+      transaction: txHash,
+      details: "Testing authz transaction processing"
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    serverLogger.error("Error processing authz transaction:", error);
+    res.status(500).json({
+      success: false,
+      error: "Error processing authz transaction",
+      transaction: txHash,
+      errorDetails: errorMessage
+    });
+  }
+});
+
 // Get all transactions for a user
 app.get("/transactions/:address", (req, res) => {
   const address = req.params.address;

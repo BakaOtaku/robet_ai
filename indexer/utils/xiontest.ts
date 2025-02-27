@@ -18,7 +18,7 @@ const DENOM = "uxion";
 // You can use a fixed mnemonic for testing instead of generating a new one each time
 // This way you can fund it once from the faucet and reuse it
 const TEST_MNEMONIC =
-  "bird tongue horror outer execute true reward panda apology canyon federal kite brain ripple mechanic";
+  "spray unveil couch swamp improve paddle torch march expand ability digital extra spike tilt unable";
 
 // Function to query transaction details from the LCD/REST API endpoint
 async function queryTransactionDetails(txHash: string) {

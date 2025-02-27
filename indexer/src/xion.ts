@@ -138,12 +138,14 @@ async function tryAlternativeEndpoints(
 
 // Extract deposit events from transaction data
 function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
-  if (!txData || !txData.tx_response || !txData.tx_response.events) {
+  if (!txData || !txData.tx_response) {
     return [];
   }
 
-  // Find deposit events
-  const depositEvents = txData.tx_response.events.filter(
+  const events = txData.tx_response.events || [];
+  
+  // Find deposit events from event logs
+  const depositEvents = events.filter(
     (event: any) =>
       event.type === "wasm-deposit_token" ||
       event.type.includes("deposit_token") ||
@@ -158,30 +160,65 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
       } potential deposit events in tx ${txHash.slice(0, 10)}...`
     );
   } else {
-    // Check if this is a transaction to our contract
-    const isContractTx = txData.tx?.body?.messages?.some(
+    // No explicit deposit events found, check transaction body
+    if (!txData.tx?.body?.messages) {
+      return [];
+    }
+
+    const messages = txData.tx.body.messages;
+    
+    // Check for direct contract call with funds
+    const directContractMsg = messages.find(
       (msg: any) =>
         msg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
         msg.contract === contractAddress
     );
 
-    if (isContractTx) {
-      const contractMsg = txData.tx.body.messages.find(
+    if (directContractMsg?.funds?.length > 0) {
+      const fund = directContractMsg.funds[0];
+      xionLogger.info(
+        `Created synthetic deposit event from direct call with amount ${fund.amount} ${fund.denom}`
+      );
+
+      return [
+        {
+          contractAddress: contractAddress,
+          user: directContractMsg.sender,
+          amount: fund.amount,
+          tokenAddress: fund.denom,
+          tokenType: "native",
+          timestamp: new Date(txData.tx_response.timestamp)
+            .getTime()
+            .toString(),
+          txHash: txHash,
+          blockHeight: txData.tx_response.height,
+          blockTimestamp: txData.tx_response.timestamp,
+        },
+      ];
+    }
+
+    // Check for authz execution
+    const authzMsg = messages.find(
+      (msg: any) => msg["@type"] === "/cosmos.authz.v1beta1.MsgExec"
+    );
+
+    if (authzMsg && Array.isArray(authzMsg.msgs)) {
+      const nestedContractMsg = authzMsg.msgs.find(
         (msg: any) =>
           msg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
           msg.contract === contractAddress
       );
 
-      if (contractMsg?.funds?.length > 0) {
-        const fund = contractMsg.funds[0];
+      if (nestedContractMsg?.funds?.length > 0) {
+        const fund = nestedContractMsg.funds[0];
         xionLogger.info(
-          `Created synthetic deposit event with amount ${fund.amount} ${fund.denom}`
+          `Created synthetic deposit event from authz call with amount ${fund.amount} ${fund.denom}`
         );
 
         return [
           {
             contractAddress: contractAddress,
-            user: contractMsg.sender,
+            user: nestedContractMsg.sender, // Original sender from the nested message
             amount: fund.amount,
             tokenAddress: fund.denom,
             tokenType: "native",
@@ -195,10 +232,11 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
         ];
       }
     }
+    
     return [];
   }
 
-  // Format deposit events
+  // Format deposit events from event logs
   return depositEvents.map((event: any) => {
     let userAddress = "";
     let amount = "";
@@ -233,20 +271,47 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
       }
     }
 
-    // Try to extract missing data from transaction
+    // If needed attributes not found in event data, try to extract from transaction body
     if ((!amount || !userAddress) && txData.tx?.body?.messages) {
-      const contractMsg = txData.tx.body.messages.find(
+      const messages = txData.tx.body.messages;
+      
+      // Check direct contract call
+      const directContractMsg = messages.find(
         (msg: any) =>
           msg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
           msg.contract === contractAddress
       );
 
-      if (contractMsg) {
-        if (!userAddress) userAddress = contractMsg.sender;
+      if (directContractMsg) {
+        if (!userAddress) userAddress = directContractMsg.sender;
 
-        if (!amount && contractMsg.funds?.length > 0) {
-          amount = contractMsg.funds[0].amount;
-          if (!tokenAddress) tokenAddress = contractMsg.funds[0].denom;
+        if (!amount && directContractMsg.funds?.length > 0) {
+          amount = directContractMsg.funds[0].amount;
+          if (!tokenAddress) tokenAddress = directContractMsg.funds[0].denom;
+        }
+      }
+      
+      // Check authz execution
+      if (!userAddress || !amount) {
+        const authzMsg = messages.find(
+          (msg: any) => msg["@type"] === "/cosmos.authz.v1beta1.MsgExec"
+        );
+
+        if (authzMsg && Array.isArray(authzMsg.msgs)) {
+          const nestedContractMsg = authzMsg.msgs.find(
+            (msg: any) =>
+              msg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
+              msg.contract === contractAddress
+          );
+
+          if (nestedContractMsg) {
+            if (!userAddress) userAddress = nestedContractMsg.sender;
+
+            if (!amount && nestedContractMsg.funds?.length > 0) {
+              amount = nestedContractMsg.funds[0].amount;
+              if (!tokenAddress) tokenAddress = nestedContractMsg.funds[0].denom;
+            }
+          }
         }
       }
     }
@@ -380,14 +445,38 @@ async function isTransactionForContract(
     const response = await axios.get(url);
 
     if (response.data?.tx?.body?.messages) {
-      const hasContractMsg = response.data.tx.body.messages.some(
+      const messages = response.data.tx.body.messages;
+
+      // Check for direct contract execution
+      const hasDirectContractMsg = messages.some(
         (msg: any) =>
           msg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
           msg.contract === targetContract
       );
 
-      if (hasContractMsg) {
-        xionLogger.info(`Found contract transaction ${txHash.slice(0, 10)}...`);
+      if (hasDirectContractMsg) {
+        xionLogger.info(`Found direct contract transaction ${txHash.slice(0, 10)}...`);
+        return true;
+      }
+
+      // Check for contract execution via authz
+      const hasAuthzContractMsg = messages.some((msg: any) => {
+        if (msg["@type"] === "/cosmos.authz.v1beta1.MsgExec" && Array.isArray(msg.msgs)) {
+          return msg.msgs.some((nestedMsg: any) => {
+            if (typeof nestedMsg === 'object' && nestedMsg !== null) {
+              return (
+                nestedMsg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
+                nestedMsg.contract === targetContract
+              );
+            }
+            return false;
+          });
+        }
+        return false;
+      });
+
+      if (hasAuthzContractMsg) {
+        xionLogger.info(`Found authz contract transaction ${txHash.slice(0, 10)}...`);
         return true;
       }
     }
