@@ -4,11 +4,13 @@ import {
   SigningCosmWasmClient,
   CosmWasmClient,
 } from "@cosmjs/cosmwasm-stargate";
+import axios from "axios";
 
 // Contract details
 const CONTRACT_ADDRESS =
-  "xion1yyw2u9c7lvv4my77gdw3n9rxz6nekymq4gq26w39c6m6nh9txlhs73pnht";
+  "xion1ys6n97h8y9s8ncmlqhjh2wswn8mgqul45j9fatqznvkfeuyqm6pqfwf3sw";
 const RPC_ENDPOINT = "https://rpc.xion-testnet-1.burnt.com:443";
+const LCD_ENDPOINT = "https://api.xion-testnet-1.burnt.com";
 
 // Native token denomination (uxion = microxion, where 1 XION = 1,000,000 uxion)
 const DENOM = "uxion";
@@ -18,9 +20,57 @@ const DENOM = "uxion";
 const TEST_MNEMONIC =
   "bird tongue horror outer execute true reward panda apology canyon federal kite brain ripple mechanic";
 
+// Function to query transaction details from the LCD/REST API endpoint
+async function queryTransactionDetails(txHash: string) {
+  try {
+    console.log(`Querying transaction details from LCD API for hash: ${txHash}`);
+    const response = await axios.get(`${LCD_ENDPOINT}/cosmos/tx/v1beta1/txs/${txHash}`);
+    return response.data;
+  } catch (error: any) {
+    console.error("Error querying transaction details:", error.message);
+    return null;
+  }
+}
+
+// Function to extract deposit events from transaction data
+function extractDepositEvents(txData: any) {
+  if (!txData || !txData.tx_response || !txData.tx_response.events) {
+    return [];
+  }
+
+  // Find all deposit events
+  const depositEvents = txData.tx_response.events.filter(
+    (event: any) => event.type === "wasm-deposit_token"
+  );
+
+  if (depositEvents.length === 0) {
+    console.log("No deposit events found in transaction");
+    return [];
+  }
+
+  // Format deposit events for indexer processing
+  return depositEvents.map((event: any) => {
+    const attributes: Record<string, string> = {};
+    
+    // Convert attributes array to object for easier access
+    event.attributes.forEach((attr: any) => {
+      attributes[attr.key] = attr.value;
+    });
+
+    return {
+      contractAddress: attributes._contract_address || "",
+      user: attributes.user || "",
+      amount: attributes.amount || "",
+      tokenAddress: attributes.token_address || "",
+      tokenType: attributes.token_type || "",
+      timestamp: attributes.timestamp || "",
+    };
+  });
+}
+
 async function main() {
   try {
-    console.log("Starting Xion transfer test");
+    console.log("Starting Xion contract deposit test");
     console.log(`Contract address: ${CONTRACT_ADDRESS}`);
     console.log(`RPC endpoint: ${RPC_ENDPOINT}`);
 
@@ -38,7 +88,7 @@ async function main() {
     const queryClient = await StargateClient.connect(RPC_ENDPOINT);
     const cosmWasmClient = await CosmWasmClient.connect(RPC_ENDPOINT);
 
-    // Query contract config to get admin wallet
+    // Query contract config
     try {
       console.log("Querying contract configuration...");
       const queryResult = await cosmWasmClient.queryContractSmart(
@@ -68,81 +118,92 @@ async function main() {
         wallet
       );
 
-      // Prepare transfer
-      const amount = "100000"; // 0.1 XION
+      // Prepare contract deposit
+      const depositAmount = "10000"; // 0.1 XION
       const gasPrice = GasPrice.fromString("0.025uxion");
       const fee = calculateFee(200000, gasPrice);
 
-      console.log(
-        `Sending transfer of ${amount} ${DENOM} to admin wallet: ${adminWallet}`
-      );
+      // Create deposit message for the contract
+      const depositMsg = {
+        deposit_token: {
+          token_address: DENOM,
+          amount: depositAmount,
+        },
+      };
 
-      // Send tokens directly to admin wallet
-      const result = await signingClient.sendTokens(
+      console.log(`Sending deposit of ${depositAmount} ${DENOM} to contract`);
+      console.log(`Using message: ${JSON.stringify(depositMsg)}`);
+
+      // Execute the deposit transaction
+      const funds = [coin(depositAmount, DENOM)];
+
+      const result = await signingClient.execute(
         myAddress,
-        adminWallet,
-        [coin(amount, DENOM)],
+        CONTRACT_ADDRESS,
+        depositMsg,
         fee,
-        "Testing indexer - direct transfer"
+        "",
+        funds
       );
 
-      console.log("Transfer transaction completed!");
+      console.log("Contract deposit transaction completed!");
       console.log(`Transaction hash: ${result.transactionHash}`);
       console.log(`Gas used: ${result.gasUsed}`);
 
-      // Check balance after transfer
-      const balanceAfter = await queryClient.getAllBalances(myAddress);
-      console.log(`Final account balances: ${JSON.stringify(balanceAfter)}`);
+      // Wait for transaction to be indexed
+      console.log("\nWaiting for transaction to be indexed...");
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      // Now attempt to call the contract's deposit_token function (this will fail, but useful for debugging)
-      console.log(
-        "\n----- Attempting contract deposit (expected to fail) -----"
-      );
-      console.log("This section is for contract debugging purposes only");
-
-      try {
-        // Prepare deposit message
-        const depositAmount = "50000"; // 0.05 XION
-
-        // Try the deposit_token message format from the contract code
-        const depositMsg = {
-          deposit_token: {
-            token_address: DENOM,
-            amount: depositAmount,
-          },
-        };
-
-        console.log(
-          `Attempting deposit of ${depositAmount} ${DENOM} to contract`
-        );
-        console.log(`Using message: ${JSON.stringify(depositMsg)}`);
-
-        // Execute the deposit transaction
-        const funds = [coin(depositAmount, DENOM)];
-
-        const depositResult = await signingClient.execute(
-          myAddress,
-          CONTRACT_ADDRESS,
-          depositMsg,
-          fee,
-          "",
-          funds
-        );
-
-        console.log("Deposit successful (unexpected)!");
-        console.log(`Transaction hash: ${depositResult.transactionHash}`);
-      } catch (error: any) {
-        console.log("Contract deposit failed with error (as expected):");
-        console.log("Error message:", error.message);
-        console.log(
-          "\nShare this error with your contract developer to fix the issue with native token handling"
-        );
-        console.log(
-          "The issue is likely in the token_address validation in the contract code"
-        );
+      // Get detailed transaction data for indexer
+      console.log("\n----- QUERYING TRANSACTION FOR INDEXER -----");
+      const txData = await queryTransactionDetails(result.transactionHash);
+      
+      if (txData) {
+        console.log("Transaction height:", txData.tx_response.height);
+        console.log("Transaction timestamp:", txData.tx_response.timestamp);
+        
+        // Extract and process deposit events for indexer
+        const depositEvents = extractDepositEvents(txData);
+        
+        if (depositEvents.length > 0) {
+          console.log("\n----- DEPOSIT EVENTS FOR INDEXER -----");
+          depositEvents.forEach((event: any, index: number) => {
+            console.log(`\nDeposit Event #${index + 1}:`);
+            console.log("  Contract Address:", event.contractAddress);
+            console.log("  User:", event.user);
+            console.log("  Amount:", event.amount);
+            console.log("  Token Address:", event.tokenAddress);
+            console.log("  Token Type:", event.tokenType);
+            console.log("  Timestamp:", event.timestamp);
+            
+            // Example of how to format for indexer database
+            const indexerRecord = {
+              transaction_hash: result.transactionHash,
+              block_height: txData.tx_response.height,
+              block_timestamp: txData.tx_response.timestamp,
+              contract_address: event.contractAddress,
+              user_address: event.user,
+              amount: event.amount,
+              token: event.tokenAddress,
+              token_type: event.tokenType,
+              event_timestamp: event.timestamp
+            };
+            
+            console.log("\nIndexer Record (for database):");
+            console.log(JSON.stringify(indexerRecord, null, 2));
+          });
+        } else {
+          console.log("No deposit events found to index");
+        }
+      } else {
+        console.log("Failed to retrieve transaction data for indexing");
       }
-    } catch (queryError) {
-      console.error("Error during operation:", queryError);
+
+      // Check balance after deposit
+      const balanceAfter = await queryClient.getAllBalances(myAddress);
+      console.log(`\nFinal account balances: ${JSON.stringify(balanceAfter)}`);
+    } catch (error: any) {
+      console.error("Error during operation:", error.message);
     }
   } catch (err) {
     console.error("Error during test:", err);

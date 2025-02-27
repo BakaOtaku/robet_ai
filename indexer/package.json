@@ -7,7 +7,7 @@
     "start": "ts-node src/app.ts",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:xion": "ts-node utils/xiontest.ts"
+    "test:xion": "ts-node src/tests/xionTest.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +18,7 @@
     "@cosmjs/stargate": "^0.33.0",
     "@types/express": "^5.0.0",
     "@types/uuid": "^10.0.0",
+    "axios": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
