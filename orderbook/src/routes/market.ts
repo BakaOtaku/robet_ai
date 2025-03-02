@@ -44,6 +44,19 @@ marketRouter.get("/trades", async (req: any, res: any) => {
   }
 });
 
+// GET /api/market/all - Get all markets
+marketRouter.get("/all", async (req: any, res: any) => {
+  try {
+    // Query the Market model for all markets
+    const allMarkets = await Market.find();
+    return res.json({ success: true, markets: allMarkets });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, error: error });
+  }
+});
+
+
 // GET /api/market/active - Get all active markets
 marketRouter.get("/active", async (req: any, res: any) => {
   try {
