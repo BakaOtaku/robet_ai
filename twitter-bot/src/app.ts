@@ -85,23 +85,39 @@ async function initializeMongoDB() {
 // -----------------------------------------------------------------
 // ----------------------------- FUNCTIONS ----------------------------
 async function createBetOnChain(tweet: Tweet) {
-  if (tweet.bet_id) {
+  if (tweet.market_id) {
     logInfo(
       `Bet already created for tweet ${tweet.tweet_id} but reply not sent`
     );
     return;
   }
   try {
-    const betId = uuidv4().split("-")[0];
-    console.log(betId);
+    // Create market in orderbook service
+    const resolutionDate = new Date(tweet.resolution_time);
+    const orderbookResponse = await axios.post(
+      "http://localhost:3001/api/market",
+      {
+        question: tweet.question,
+        creator: tweet.creator,
+        resolutionDate: resolutionDate.toISOString(),
+      }
+    );
+
+    if (!orderbookResponse.data.success) {
+      throw new Error("Failed to create market in orderbook service");
+    }
+
+    const marketId = orderbookResponse.data.market.marketId;
+    console.log(marketId);
+
     const [bidPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("bid"), Buffer.from(betId)],
+      [Buffer.from("bid"), Buffer.from(marketId)],
       program.programId
     );
 
     // Wait for the on-chain transaction to complete on Solana
     await program.methods
-      .createBid(betId, tweet.question)
+      .createBid(marketId, tweet.question)
       .accounts({
         // @ts-ignore
         bid: bidPda,
@@ -111,25 +127,13 @@ async function createBetOnChain(tweet: Tweet) {
       .signers([adminWallet])
       .rpc();
 
-    // Create bet on Xion chain
-    const xionResponse = await axios.post("http://localhost:3111/create-bet", {
-      description: tweet.question,
-      endTime: Date.now() + 7 * 24 * 60 * 60 * 1000, // Example: 1 week from now
-    });
-
-    if (!xionResponse.data.success) {
-      throw new Error("Failed to create bet on Xion chain");
-    }
-
     // Verify the MongoDB update was successful
     const updateResult = await tweetsCollection.updateOne(
       { tweet_id: tweet.tweet_id },
       {
         $set: {
-          bet_id: betId,
-          xion_bet_id: xionResponse.data.betId, // Store Xion bet ID
-          xion_transaction_hash: xionResponse.data.transactionHash, // Store Xion transaction hash
-          blink_url: `https://dial.to/?action=solana-action%3Ahttps%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${betId}%26cluster%3Ddevnet`,
+          market_id: marketId,
+          blink_url: `https://dial.to/?action=solana-action%3Ahttps%3A%2F%2Fblinks.amanraj.dev%2Fbid%3FbidId%3D${marketId}%26cluster%3Ddevnet`,
           updated_at: new Date(),
         },
       }
@@ -137,12 +141,12 @@ async function createBetOnChain(tweet: Tweet) {
 
     if (updateResult.modifiedCount === 0) {
       throw new Error(
-        `Failed to update tweet ${tweet.tweet_id} with bet ID ${betId}`
+        `Failed to update tweet ${tweet.tweet_id} with market ID ${marketId}`
       );
     }
 
     logInfo(
-      `Created bet on chain for tweet ${tweet.tweet_id} with bet ID ${betId} and Xion bet ID ${xionResponse.data.betId}`
+      `Created bet on chain for tweet ${tweet.tweet_id} with market ID ${marketId}`
     );
   } catch (error) {
     logError("Error creating bet on chain:", error);

@@ -12,7 +12,8 @@ export interface Tweet {
   resolution_time: number;
   question: string;
   blink_url: string;
-  bet_id: string;
+  creator: string;
+  market_id?: string;
   created_at: Date;
   updated_at: Date;
 }

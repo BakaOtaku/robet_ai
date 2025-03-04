@@ -62,7 +62,7 @@ app.get("/create-bid", async (req, res) => {
   try {
     const actionMetadata = {
       type: "action",
-      icon: "https://github.com/user-attachments/assets/6a5fd3c0-8e9c-4cfe-9d85-bcf177b2b4ba",
+      icon: "https://gist.github.com/user-attachments/assets/94892d96-4d17-4d37-9574-62020265d9ac",
       title: "🎲 Create Prediction Market",
       description:
         "Create a new prediction market where users can bet with SOL.",
@@ -289,7 +289,7 @@ ${bettingInfo}
 
     const actionMetadata = {
       type: "action",
-      icon: "https://github.com/user-attachments/assets/6a5fd3c0-8e9c-4cfe-9d85-bcf177b2b4ba",
+      icon: "https://gist.github.com/user-attachments/assets/94892d96-4d17-4d37-9574-62020265d9ac",
       title: `📝 ${bidAccount.content}`,
       description,
       label: isOpen ? "Place Your Bet" : "Market Resolved",
@@ -394,7 +394,7 @@ app.get("/claim-reward", async (req, res) => {
 
     const actionMetadata = {
       type: "action",
-      icon: "https://github.com/user-attachments/assets/6a5fd3c0-8e9c-4cfe-9d85-bcf177b2b4ba",
+      icon: "https://gist.github.com/user-attachments/assets/94892d96-4d17-4d37-9574-62020265d9ac",
       title: "🎉 Claim Your Reward",
       description: `
 💰 Available Reward: ${reward} SOL
