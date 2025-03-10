@@ -3,6 +3,8 @@ import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { Market } from "../models/Market";
 import { Trade } from "../models/Trade";
+import { Order } from "../models/Order";
+import { UserBalance } from "../models/UserBalance";
 import { settleMarket } from "../services/settlementService";
 
 const marketRouter = Router();
@@ -44,12 +46,52 @@ marketRouter.get("/trades", async (req: any, res: any) => {
   }
 });
 
-// GET /api/market/all - Get all markets
+// GET /api/market/all - Get all markets with platform statistics
 marketRouter.get("/all", async (req: any, res: any) => {
   try {
     // Query the Market model for all markets
     const allMarkets = await Market.find();
-    return res.json({ success: true, markets: allMarkets });
+    
+    // Get platform statistics
+    const uniqueUsers = await UserBalance.distinct('userId');
+    const totalUniqueUsers = uniqueUsers.length;
+    
+    const activeEvents = await Market.countDocuments({ settled: false });
+    
+    const totalOrders = await Order.countDocuments();
+    
+    // Get the latest trade for each market to calculate price percentage
+    const marketsWithData = await Promise.all(
+      allMarkets.map(async (market) => {
+        // Find the most recent trade for this market
+        const latestTrade = await Trade.findOne({ marketId: market.marketId })
+          .sort({ executedAt: -1 })
+          .limit(1);
+        
+        // Calculate price percentage based on the latest trade or default to 50%
+        const pricePercentage = latestTrade ? Math.round(latestTrade.price * 100) : 50;
+        
+        // Count total trades for this market
+        const totalTrades = await Trade.countDocuments({ marketId: market.marketId });
+        
+        // Return market data with percentage
+        return {
+          ...market.toObject(),
+          pricePercentage,
+          totalTrades
+        };
+      })
+    );
+    
+    return res.json({
+      success: true,
+      statistics: {
+        totalUniqueUsers,
+        activeEvents,
+        totalOrders
+      },
+      markets: marketsWithData
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, error: error });
