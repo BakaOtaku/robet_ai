@@ -41,7 +41,7 @@ userRouter.get("/:userId", async (req: any, res: any) => {
  */
 userRouter.post("/deposit", async (req: any, res: any) => {
   try {
-    const { userId, chainId, amount } = req.body;
+    let { userId, chainId, amount } = req.body;
 
     if (!userId || !chainId || amount === undefined) {
       return res.status(400).json({
@@ -56,6 +56,9 @@ userRouter.post("/deposit", async (req: any, res: any) => {
         error: "Deposit amount must be greater than 0",
       });
     }
+
+    // Normalize userId to lowercase for consistency
+    userId = userId.toLowerCase();
 
     let userBalance = await UserBalance.findOne({ userId, chainId });
     if (!userBalance) {

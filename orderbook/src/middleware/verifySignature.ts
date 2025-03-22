@@ -160,6 +160,7 @@ export function verifySignature(
       });
       return;
     }
+    console.log("Signature verified successfully for Solana");
   } else if (chainId === "xion-testnet-1") {
     console.log(
       marketId,
