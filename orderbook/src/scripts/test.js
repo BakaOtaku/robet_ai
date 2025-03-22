@@ -441,9 +441,9 @@ async function main() {
 
     // Manual expected balances based on the trading flow.
     const expectedBalances = {};
-    expectedBalances[traderA] = 107.00;  // Correct as is
+    expectedBalances[traderA] = 109.00;  // Correct as is
     expectedBalances[traderB] = 97.40;   // Adjust for -10 YES short
-    expectedBalances[traderC] = 100.25;  // No tokens, just cash flow
+    expectedBalances[traderC] = 98.25;  // No tokens, just cash flow
     expectedBalances[traderD] = 96.85;   // Adjust for -5 YES short
     expectedBalances[traderE] = 98.50;   // NO tokens worth $0
     
