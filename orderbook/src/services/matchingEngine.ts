@@ -4,8 +4,7 @@ import { UserBalance } from "../models/UserBalance";
 import { v4 as uuidv4 } from "uuid";
 
 /**
- * matchOrders attempts to match the incomingOrder with existing orders on the opposite side,
- * having the same tokenType. It can produce multiple partial fills.
+ * matchOrders attempts to match the incoming order with existing orders on the opposite side.
  */
 export async function matchOrders(incomingOrder: IOrder): Promise<void> {
   let remainingQty = incomingOrder.quantity - incomingOrder.filledQuantity;
@@ -13,27 +12,26 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
 
   while (stillOpen && remainingQty > 0) {
     const oppositeSide = incomingOrder.side === "BUY" ? "SELL" : "BUY";
-
     let priceFilter;
     let sortOption: any;
 
     if (incomingOrder.side === "BUY") {
-      // For a BUY, we want SELL orders with price <= incomingOrder.price, lowest price first.
       priceFilter = incomingOrder.price;
       sortOption = { price: 1, createdAt: 1 };
     } else {
-      // For a SELL, we want BUY orders with price >= incomingOrder.price, highest price first.
       priceFilter = incomingOrder.price;
       sortOption = { price: -1, createdAt: 1 };
     }
 
-    // Filter by marketId, side, status, price condition, and the same tokenType.
     const bestOpposingOrder = await Order.findOne({
       marketId: incomingOrder.marketId,
       side: oppositeSide,
       tokenType: incomingOrder.tokenType,
       status: { $in: ["OPEN", "PARTIAL"] },
-      price: incomingOrder.side === "BUY" ? { $lte: priceFilter } : { $gte: priceFilter }
+      price:
+        incomingOrder.side === "BUY"
+          ? { $lte: priceFilter }
+          : { $gte: priceFilter },
     }).sort(sortOption).exec();
 
     console.log("bestOpposingOrder", bestOpposingOrder);
@@ -52,7 +50,7 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
     const matchQty = Math.min(remainingQty, availableQty);
     const executionPrice = bestOpposingOrder.price;
 
-    // Create a Trade record
+    // Create a Trade record.
     const tradeId = uuidv4();
     await Trade.create({
       tradeId,
@@ -63,26 +61,16 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
       quantity: matchQty
     });
 
-    // Update filled quantities and order statuses
+    // Update order fill quantities and statuses.
     incomingOrder.filledQuantity += matchQty;
     bestOpposingOrder.filledQuantity += matchQty;
-
-    if (bestOpposingOrder.filledQuantity === bestOpposingOrder.quantity) {
-      bestOpposingOrder.status = "FILLED";
-    } else {
-      bestOpposingOrder.status = "PARTIAL";
-    }
-    if (incomingOrder.filledQuantity === incomingOrder.quantity) {
-      incomingOrder.status = "FILLED";
-      stillOpen = false;
-    } else {
-      incomingOrder.status = "PARTIAL";
-    }
+    incomingOrder.status = incomingOrder.filledQuantity === incomingOrder.quantity ? "FILLED" : "PARTIAL";
+    bestOpposingOrder.status = bestOpposingOrder.filledQuantity === bestOpposingOrder.quantity ? "FILLED" : "PARTIAL";
 
     await bestOpposingOrder.save();
     await incomingOrder.save();
 
-    // Execute the trade using the tokenType from the order.
+    // Execute the trade and adjust user token balances.
     if (incomingOrder.side === "BUY") {
       await executeTrade(
         incomingOrder.userId,
@@ -102,21 +90,27 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
         matchQty
       );
     }
-
     remainingQty -= matchQty;
   }
 }
 
 /**
- * executeTrade handles the payment and token transfers.
+ * executeTrade handles payment and token transfers.
  *
- * - The buyer pays (price × quantity).
- * - For Yes‑Token trades:
- *    • If the seller has enough YES tokens (from prior inventory), they are transferred.
- *    • Otherwise, the available YES tokens are transferred and the remaining qty is "minted":
- *      the buyer gets new YES tokens and the seller is credited with the same quantity of NO tokens.
- * - For No‑Token (secondary) trades:
- *    • Seller must already hold the NO tokens, and they are transferred to the buyer.
+ * Immediate Payment: The buyer pays price × quantity at execution.
+ * Token Transfers:
+ *  - For YES trades:
+ *      • If seller has enough YES tokens, transfer those.
+ *      • Otherwise, use available tokens and "short" the remainder:
+ *          – Mint the extra YES tokens to deliver to the buyer.
+ *          – Credit the seller with minted NO tokens.
+ *  - For NO trades (symmetric):
+ *      • If seller has enough NO tokens, transfer those.
+ *      • Otherwise, use available NO tokens and short the remainder:
+ *          – Mint extra NO tokens to deliver to the buyer.
+ *          – Credit the seller with minted YES tokens.
+ *
+ * Note: The necessary collateral for short sales is already locked at order time.
  */
 async function executeTrade(
   buyerId: string,
@@ -126,7 +120,6 @@ async function executeTrade(
   price: number,
   quantity: number
 ) {
-  // Load both users' balances
   const [buyerBal, sellerBal] = await Promise.all([
     UserBalance.findOne({ userId: buyerId }),
     UserBalance.findOne({ userId: sellerId })
@@ -136,19 +129,19 @@ async function executeTrade(
     return;
   }
 
-  // Get or create per-market records for both buyer and seller.
+  // Get or create market balances.
   let buyerMarket = buyerBal.markets.find(m => m.marketId === marketId);
   if (!buyerMarket) {
-    buyerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedCollateral: 0 };
+    buyerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
     buyerBal.markets.push(buyerMarket);
   }
   let sellerMarket = sellerBal.markets.find(m => m.marketId === marketId);
   if (!sellerMarket) {
-    sellerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedCollateral: 0 };
+    sellerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
     sellerBal.markets.push(sellerMarket);
   }
 
-  // Payment: Buyer pays seller: totalCost = price × quantity.
+  // Payment: Buyer pays seller immediate cost.
   const totalCost = price * quantity;
   if (buyerBal.availableUSD < totalCost) {
     console.error("Buyer lacks sufficient funds for the trade!");
@@ -158,34 +151,40 @@ async function executeTrade(
   sellerBal.availableUSD += totalCost;
 
   if (tokenType === "YES") {
-    // The trade is for Yes‑Tokens.
     if (sellerMarket.yesTokens >= quantity) {
-      // Seller transfers tokens from inventory.
+      // Normal transfer from inventory.
       sellerMarket.yesTokens -= quantity;
       buyerMarket.yesTokens += quantity;
     } else {
-      // Not enough tokens in inventory: seller is short.
-      const alreadyOwned = sellerMarket.yesTokens;
-      const shortAmount = quantity - alreadyOwned;
-      if (alreadyOwned > 0) {
-        sellerMarket.yesTokens -= alreadyOwned;
-        buyerMarket.yesTokens += alreadyOwned;
+      // Short sale: use available YES tokens and mint for the remainder.
+      const available = sellerMarket.yesTokens;
+      const shortAmount = quantity - available;
+      if (available > 0) {
+        sellerMarket.yesTokens -= available;
+        buyerMarket.yesTokens += available;
       }
-      // Mint the remaining tokens:
+      // Mint additional YES tokens to provide to buyer.
       buyerMarket.yesTokens += shortAmount;
-      // And credit the seller with newly created NO tokens (their short position).
-      sellerMarket.noTokens = (sellerMarket.noTokens || 0) + shortAmount;
+      // Credit seller with the opposite token (NO) for the short portion.
+      sellerMarket.noTokens += shortAmount;
     }
   } else if (tokenType === "NO") {
-    // For a secondary market trade of NO‑Tokens:
-    if (sellerMarket.noTokens < quantity) {
-      console.error("Seller does not hold enough NO‑Tokens.");
-      return;
+    if (sellerMarket.noTokens >= quantity) {
+      sellerMarket.noTokens -= quantity;
+      buyerMarket.noTokens += quantity;
+    } else {
+      const available = sellerMarket.noTokens;
+      const shortAmount = quantity - available;
+      if (available > 0) {
+        sellerMarket.noTokens -= available;
+        buyerMarket.noTokens += available;
+      }
+      // Mint additional NO tokens to supply buyer.
+      buyerMarket.noTokens += shortAmount;
+      // Credit seller with YES tokens for the shorted amount.
+      sellerMarket.yesTokens += shortAmount;
     }
-    sellerMarket.noTokens -= quantity;
-    buyerMarket.noTokens += quantity;
   }
 
-  // Save updated user balances
   await Promise.all([buyerBal.save(), sellerBal.save()]);
 }
