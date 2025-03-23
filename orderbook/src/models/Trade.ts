@@ -7,6 +7,7 @@ export interface ITrade extends Document {
   sellOrderId: string;
   price: number;
   quantity: number;
+  tokenType: "YES" | "NO";
   executedAt: Date;
 }
 
@@ -17,6 +18,7 @@ const TradeSchema = new Schema<ITrade>({
   sellOrderId: { type: String, required: true },
   price: { type: Number, required: true },
   quantity: { type: Number, required: true },
+  tokenType: { type: String, enum: ["YES", "NO"], required: true },
   executedAt: { type: Date, default: Date.now }
 });
 

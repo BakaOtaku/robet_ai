@@ -32,13 +32,19 @@ marketRouter.post("/", async (req: any, res: any) => {
 // GET /api/trades - Get trades for a market
 marketRouter.get("/trades", async (req: any, res: any) => {
   try {
-    const { marketId } = req.query;
+    const { marketId, tokenType } = req.query;
     if (!marketId) {
       return res.status(400).json({ success: false, error: "marketId is required" });
     }
 
-    // Query the Trade model for trades with this marketId
-    const trades = await Trade.find({ marketId });
+    // Build query with optional tokenType filter
+    const query: any = { marketId };
+    if (tokenType && (tokenType === 'YES' || tokenType === 'NO')) {
+      query.tokenType = tokenType;
+    }
+
+    // Query the Trade model with filters
+    const trades = await Trade.find(query).sort({ executedAt: -1 });
     return res.json({ success: true, trades });
   } catch (error) {
     console.error(error);
@@ -63,13 +69,21 @@ marketRouter.get("/all", async (req: any, res: any) => {
     // Get the latest trade for each market to calculate price percentage
     const marketsWithData = await Promise.all(
       allMarkets.map(async (market) => {
-        // Find the most recent trade for this market
-        const latestTrade = await Trade.findOne({ marketId: market.marketId })
-          .sort({ executedAt: -1 })
-          .limit(1);
+        // Find the most recent YES trade for this market
+        const latestYesTrade = await Trade.findOne({ 
+          marketId: market.marketId,
+          tokenType: "YES" 
+        }).sort({ executedAt: -1 }).limit(1);
         
-        // Calculate price percentage based on the latest trade or default to 50%
-        const pricePercentage = latestTrade ? Math.round(latestTrade.price * 100) : 50;
+        // Find the most recent NO trade for this market
+        const latestNoTrade = await Trade.findOne({ 
+          marketId: market.marketId,
+          tokenType: "NO" 
+        }).sort({ executedAt: -1 }).limit(1);
+        
+        // Calculate price percentages based on the latest trades or default to 50%
+        const yesPricePercentage = latestYesTrade ? Math.round(latestYesTrade.price * 100) : 50;
+        const noPricePercentage = latestNoTrade ? Math.round(latestNoTrade.price * 100) : 50;
         
         // Count total trades for this market
         const totalTrades = await Trade.countDocuments({ marketId: market.marketId });
@@ -77,7 +91,8 @@ marketRouter.get("/all", async (req: any, res: any) => {
         // Return market data with percentage
         return {
           ...market.toObject(),
-          pricePercentage,
+          yesPricePercentage,
+          noPricePercentage,
           totalTrades
         };
       })

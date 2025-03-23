@@ -58,7 +58,8 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
       buyOrderId: incomingOrder.side === "BUY" ? incomingOrder.orderId : bestOpposingOrder.orderId,
       sellOrderId: incomingOrder.side === "SELL" ? incomingOrder.orderId : bestOpposingOrder.orderId,
       price: executionPrice,
-      quantity: matchQty
+      quantity: matchQty,
+      tokenType: incomingOrder.tokenType
     });
 
     // Update order fill quantities and statuses.

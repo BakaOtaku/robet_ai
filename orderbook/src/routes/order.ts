@@ -1,7 +1,7 @@
 // routes/order.ts
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { Order, OrderTokenType } from "../models/Order";
+import { IOrder, Order, OrderTokenType } from "../models/Order";
 import { UserBalance } from "../models/UserBalance";
 import { matchOrders } from "../services/matchingEngine";
 import { verifySignature } from "../middleware/verifySignature";
@@ -130,6 +130,101 @@ orderRouter.get("/", async (req: any, res: any) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, error: error });
+  }
+});
+
+// GET /api/order/book - Get orderbook data by market and token type
+orderRouter.get("/book", async (req: any, res: any) => {
+  try {
+    const { marketId, tokenType = "YES" } = req.query;
+    
+    if (!marketId) {
+      return res
+        .status(400)
+        .json({ success: false, error: "marketId is required" });
+    }
+    
+    if (tokenType !== "YES" && tokenType !== "NO") {
+      return res
+        .status(400)
+        .json({ success: false, error: "tokenType must be YES or NO" });
+    }
+
+    // Find all active orders for this market and token type
+    const orders = await Order.find({
+      marketId,
+      tokenType,
+      status: { $in: ["OPEN", "PARTIAL"] }
+    });
+
+    // Separate into buy and sell orders
+    const buyOrders = orders
+      .filter(order => order.side === "BUY")
+      .sort((a, b) => b.price - a.price); // Sort by price descending
+
+    const sellOrders = orders
+      .filter(order => order.side === "SELL")
+      .sort((a, b) => a.price - b.price); // Sort by price ascending
+
+    // Group orders by price level for the orderbook display
+    const aggregatePriceLevels = (orders: IOrder[]) => {
+      const priceLevels: Record<string, {
+        price: number;
+        totalQuantity: number;
+        orders: number;
+      }> = {};
+      
+      orders.forEach(order => {
+        const price = order.price.toFixed(3);
+        const remainingQuantity = order.quantity - order.filledQuantity;
+        
+        if (!priceLevels[price]) {
+          priceLevels[price] = {
+            price: parseFloat(price),
+            totalQuantity: 0,
+            orders: 0
+          };
+        }
+        
+        priceLevels[price].totalQuantity += remainingQuantity;
+        priceLevels[price].orders += 1;
+      });
+      
+      return Object.values(priceLevels);
+    };
+
+    // Get the spread if there are both buy and sell orders
+    const getBestPrices = () => {
+      const bestBid = buyOrders.length > 0 ? buyOrders[0].price : null;
+      const bestAsk = sellOrders.length > 0 ? sellOrders[0].price : null;
+      
+      if (bestBid !== null && bestAsk !== null && bestBid > 0) {
+        return {
+          bestBid,
+          bestAsk,
+          spread: bestAsk - bestBid,
+          spreadPercentage: ((bestAsk / bestBid) - 1) * 100
+        };
+      }
+      
+      return { bestBid, bestAsk, spread: null, spreadPercentage: null };
+    };
+
+    // Return structured orderbook data
+    return res.json({
+      success: true,
+      marketId,
+      tokenType,
+      buyLevels: aggregatePriceLevels(buyOrders),
+      sellLevels: aggregatePriceLevels(sellOrders),
+      ...getBestPrices()
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    });
   }
 });
 
