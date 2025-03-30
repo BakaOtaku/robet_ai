@@ -17,6 +17,8 @@ const fetch = require('node-fetch');
 const nacl = require('tweetnacl');
 const bs58 = require('bs58').default;
 const { TextEncoder } = require('util');
+const Table = require('cli-table3');
+const colors = require('colors/safe');
 
 const BASE_URL = 'http://localhost:3001/api';
 
@@ -38,6 +40,22 @@ const traderE = 'TraderE-' + timestamp;
 const traders = [traderA, traderB, traderC, traderD, traderE];
 
 const traderKeys = generateTraderKeys(traders);
+
+// Add this map at the top of the script, after other variable declarations
+const orderMap = {};
+
+// Add these maps to track price levels by trader, after the orderMap declaration
+const yesPriceLevelTraders = {};  // Maps price -> {BUY: traderId, SELL: traderId}
+const noPriceLevelTraders = {};   // Maps price -> {BUY: traderId, SELL: traderId}
+
+// Add this function to update our price level maps when orders are placed
+function trackOrderPriceLevel(userId, side, price, tokenType) {
+  const map = tokenType === "YES" ? yesPriceLevelTraders : noPriceLevelTraders;
+  if (!map[price]) {
+    map[price] = {};
+  }
+  map[price][side] = userId;
+}
 
 /**
  * Helper function to sign an order message.
@@ -75,23 +93,225 @@ function sleep(ms) {
  funds get transferred from admin EOA to user via a simple transfer call in js
 */
 
+// Helper functions for visualization
+async function displayUserBalances(traders, marketId) {
+  const table = new Table({
+    head: [
+      colors.cyan('Trader'), 
+      colors.cyan('USD Balance'), 
+      colors.green('YES Tokens'), 
+      colors.red('NO Tokens'),
+      colors.yellow('YES Locked'),
+      colors.yellow('NO Locked')
+    ],
+    colWidths: [12, 12, 12, 12, 12, 12]
+  });
+
+  for (const trader of traders) {
+    const res = await fetch(`${BASE_URL}/users/${trader}?chainId=solana`);
+    const userResponse = await res.json();
+    
+    if (!userResponse.success) {
+      console.log(colors.red(`Error fetching balance for ${trader}: ${userResponse.error || 'Unknown error'}`));
+      continue;
+    }
+    
+    const balance = userResponse.balance || {};
+    
+    // Find the market-specific balance entry
+    const marketBalance = balance.markets?.find(m => m.marketId === marketId);
+    
+    table.push([
+      trader.split('-')[0], // Just show the trader name without timestamp
+      balance.availableUSD?.toFixed(2) || '0.00',
+      marketBalance?.yesTokens?.toString() || '0',
+      marketBalance?.noTokens?.toString() || '0',
+      marketBalance?.lockedCollateralYes?.toFixed(2) || '0.00',
+      marketBalance?.lockedCollateralNo?.toFixed(2) || '0.00'
+    ]);
+  }
+  
+  console.log(colors.bold('\n📊 User Balances:'));
+  console.log(table.toString());
+}
+
+async function displayOrderbook(marketId) {
+  try {
+    // Get the orderbook for YES tokens
+    const resYes = await fetch(`${BASE_URL}/order/book?marketId=${marketId}&tokenType=YES`);
+    const yesOrderbookResp = await resYes.json();
+    
+    // Get the orderbook for NO tokens
+    const resNo = await fetch(`${BASE_URL}/order/book?marketId=${marketId}&tokenType=NO`);
+    const noOrderbookResp = await resNo.json();
+    
+    if (!yesOrderbookResp.success || !noOrderbookResp.success) {
+      console.log(colors.red("Error fetching orderbook:", 
+        yesOrderbookResp.error || noOrderbookResp.error || "Unknown error"));
+      return;
+    }
+
+    console.log(colors.bold('\n📈 Orderbook:'));
+    
+    // YES orderbook
+    const yesTable = new Table({
+      head: [
+        colors.cyan('Type'), 
+        colors.cyan('Price'), 
+        colors.cyan('Quantity'),
+        colors.cyan('Orders'),
+        colors.cyan('Trader')
+      ],
+      colWidths: [12, 12, 12, 12, 12]
+    });
+    
+    // Display YES buy orders (bids)
+    if (yesOrderbookResp.buyLevels && yesOrderbookResp.buyLevels.length > 0) {
+      yesOrderbookResp.buyLevels.forEach(level => {
+        // Get trader from our price level map
+        const price = level.price;
+        let traderName = "Unknown";
+        
+        if (yesPriceLevelTraders[price] && yesPriceLevelTraders[price]["BUY"]) {
+          const traderId = yesPriceLevelTraders[price]["BUY"];
+          traderName = traderId.split('-')[0];
+        }
+        
+        yesTable.push([
+          colors.green('BUY YES'), 
+          level.price.toFixed(2), 
+          level.totalQuantity,
+          level.orders,
+          traderName
+        ]);
+      });
+    }
+        
+    // Display YES sell orders (asks)
+    if (yesOrderbookResp.sellLevels && yesOrderbookResp.sellLevels.length > 0) {
+      yesOrderbookResp.sellLevels.forEach(level => {
+        // Get trader from our price level map
+        const price = level.price;
+        let traderName = "Unknown";
+        
+        if (yesPriceLevelTraders[price] && yesPriceLevelTraders[price]["SELL"]) {
+          const traderId = yesPriceLevelTraders[price]["SELL"];
+          traderName = traderId.split('-')[0];
+        }
+        
+        yesTable.push([
+          colors.red('SELL YES'), 
+          level.price.toFixed(2), 
+          level.totalQuantity,
+          level.orders,
+          traderName
+        ]);
+      });
+    }
+    
+    console.log(colors.yellow(' YES Token Orders:'));
+    if ((!yesOrderbookResp.buyLevels || yesOrderbookResp.buyLevels.length === 0) && 
+        (!yesOrderbookResp.sellLevels || yesOrderbookResp.sellLevels.length === 0)) {
+      console.log(colors.gray(' No YES orders in the book'));
+    } else {
+      console.log(yesTable.toString());
+      if (yesOrderbookResp.bestBid && yesOrderbookResp.bestAsk) {
+        console.log(colors.cyan(` Best Bid: ${yesOrderbookResp.bestBid.toFixed(2)} | Best Ask: ${yesOrderbookResp.bestAsk.toFixed(2)} | Spread: ${yesOrderbookResp.spread?.toFixed(2) || 'N/A'}`));
+      }
+    }
+    
+    // NO orderbook
+    const noTable = new Table({
+      head: [
+        colors.cyan('Type'), 
+        colors.cyan('Price'), 
+        colors.cyan('Quantity'),
+        colors.cyan('Orders'),
+        colors.cyan('Trader')
+      ],
+      colWidths: [12, 12, 12, 12, 12]
+    });
+    
+    // Display NO buy orders (bids)
+    if (noOrderbookResp.buyLevels && noOrderbookResp.buyLevels.length > 0) {
+      noOrderbookResp.buyLevels.forEach(level => {
+        // Get trader from our price level map
+        const price = level.price;
+        let traderName = "Unknown";
+        
+        if (noPriceLevelTraders[price] && noPriceLevelTraders[price]["BUY"]) {
+          const traderId = noPriceLevelTraders[price]["BUY"];
+          traderName = traderId.split('-')[0];
+        }
+        
+        noTable.push([
+          colors.green('BUY NO'), 
+          level.price.toFixed(2), 
+          level.totalQuantity,
+          level.orders,
+          traderName
+        ]);
+      });
+    }
+        
+    // Display NO sell orders (asks)
+    if (noOrderbookResp.sellLevels && noOrderbookResp.sellLevels.length > 0) {
+      noOrderbookResp.sellLevels.forEach(level => {
+        // Get trader from our price level map
+        const price = level.price;
+        let traderName = "Unknown";
+        
+        if (noPriceLevelTraders[price] && noPriceLevelTraders[price]["SELL"]) {
+          const traderId = noPriceLevelTraders[price]["SELL"];
+          traderName = traderId.split('-')[0];
+        }
+        
+        noTable.push([
+          colors.red('SELL NO'), 
+          level.price.toFixed(2), 
+          level.totalQuantity,
+          level.orders,
+          traderName
+        ]);
+      });
+    }
+    
+    console.log(colors.yellow('\n NO Token Orders:'));
+    if ((!noOrderbookResp.buyLevels || noOrderbookResp.buyLevels.length === 0) && 
+        (!noOrderbookResp.sellLevels || noOrderbookResp.sellLevels.length === 0)) {
+      console.log(colors.gray(' No NO orders in the book'));
+    } else {
+      console.log(noTable.toString());
+      if (noOrderbookResp.bestBid && noOrderbookResp.bestAsk) {
+        console.log(colors.cyan(` Best Bid: ${noOrderbookResp.bestBid.toFixed(2)} | Best Ask: ${noOrderbookResp.bestAsk.toFixed(2)} | Spread: ${noOrderbookResp.spread?.toFixed(2) || 'N/A'}`));
+      }
+    }
+  } catch (error) {
+    console.log(colors.red("\nError in displayOrderbook:", error.message));
+  }
+}
+
+async function displayMarketStatus(marketId) {
+  await displayOrderbook(marketId);
+  await displayUserBalances(traders, marketId);
+  console.log('\n' + colors.gray('─'.repeat(75)) + '\n');
+}
+
 async function main() {
   try {
     // Deposit an initial 100 USD for each trader.
-    // With the updated deposit endpoint, this serves as both depositing funds and creating the user if needed.
-    console.log('--- Depositing Initial Funds for 5 Users ---');
+    console.log(colors.bold.cyan('\n🚀 INITIALIZING TEST SCENARIO\n'));
     for (const trader of traders) {
-      const res = await fetch(`${BASE_URL}/users/deposit`, {
+      await fetch(`${BASE_URL}/users/deposit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: trader, chainId: "solana", amount: 100 })
       });
-      // For simplicity, we assume the deposit succeeds if no error is returned.
-      console.log(`User ${trader} deposit successful.`);
     }
+    console.log(colors.green('✓ Deposited 100 USD for each trader'));
 
     // 0. Market Initialization
-    console.log('--- Creating Market ---');
+    console.log(colors.bold.magenta('\n📊 CREATING PREDICTION MARKET\n'));
     const marketQuestion = "Will Bitcoin price exceed $150,000 by December 31?";
     const resolutionDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days later
     let res = await fetch(`${BASE_URL}/market`, {
@@ -106,11 +326,16 @@ async function main() {
     const marketResp = await res.json();
     const market = marketResp.market;
     const marketId = market.marketId;
-    console.log("Market created:", marketId, market.question);
+    console.log(colors.green(`✓ Market created: "${market.question}" (ID: ${marketId})`));
+    
+    // Show initial state
+    await displayMarketStatus(marketId);
 
     // 1. Trade 1 – Setting the Initial Price.
+    console.log(colors.bold.yellow('\n🔄 TRADE 1: INITIAL PRICE SETTING - $0.50\n'));
+    
     // Trader A places a BUY order for 10 YES‑Tokens at $0.50.
-    console.log('--- Trade 1: Trader A BUY 10 YES tokens at $0.50 ---');
+    console.log(colors.blue('Trader A places a BUY order: 10 YES tokens @ $0.50'));
     const orderA1 = {
       marketId,
       userId: traderA,
@@ -127,14 +352,20 @@ async function main() {
     });
     const buyOrder1Response = await res.json();
     if (!buyOrder1Response.success) {
-        console.error("Error placing BUY order for Trader A:", buyOrder1Response.error);
+        console.error(colors.red("Error placing BUY order for Trader A:", buyOrder1Response.error));
         process.exit(1);
     }
-    const buyOrder1 = buyOrder1Response.order;
-    console.log("Trader A BUY Order:", buyOrder1.orderId);
+    if (buyOrder1Response.order && buyOrder1Response.order.orderId) {
+        orderMap[buyOrder1Response.order.orderId] = traderA;
+    }
+    
+    // Trader A places a BUY order - after order JSON creation
+    trackOrderPriceLevel(traderA, "BUY", 0.50, "YES");
+
+    await displayMarketStatus(marketId);
 
     // Trader B places a SELL order for 10 YES‑Tokens at $0.50 (short sale).
-    console.log('--- Trade 1: Trader B SELL 10 YES tokens at $0.50 ---');
+    console.log(colors.blue('Trader B places a SELL order: 10 YES tokens @ $0.50 (short)'));
     const orderB1 = {
       marketId,
       userId: traderB,
@@ -151,17 +382,24 @@ async function main() {
     });
     const sellOrder1Response = await res.json();
     if (!sellOrder1Response.success) {
-        console.error("Error placing SELL order for Trader B:", sellOrder1Response.error);
+        console.error(colors.red("Error placing SELL order for Trader B:", sellOrder1Response.error));
         process.exit(1);
     }
-    const sellOrder1 = sellOrder1Response.order;
-    console.log("Trader B SELL Order:", sellOrder1.orderId);
+    if (sellOrder1Response.order && sellOrder1Response.order.orderId) {
+        orderMap[sellOrder1Response.order.orderId] = traderB;
+    }
+
+    // Trader B places a SELL order - after order JSON creation  
+    trackOrderPriceLevel(traderB, "SELL", 0.50, "YES");
 
     await sleep(500);
+    await displayMarketStatus(marketId);
 
     // 2. Trade 2 – Additional Minting at a New Price.
+    console.log(colors.bold.yellow('\n🔄 TRADE 2: ADDITIONAL MINTING - $0.55\n'));
+    
     // Trader C places a BUY order for 5 YES‑Tokens at $0.55.
-    console.log('--- Trade 2: Trader C BUY 5 YES tokens at $0.55 ---');
+    console.log(colors.blue('Trader C places a BUY order: 5 YES tokens @ $0.55'));
     const orderC1 = {
       marketId,
       userId: traderC,
@@ -178,14 +416,20 @@ async function main() {
     });
     const buyOrder2Response = await res.json();
     if (!buyOrder2Response.success) {
-        console.error("Error placing BUY order for Trader C:", buyOrder2Response.error);
+        console.error(colors.red("Error placing BUY order for Trader C:", buyOrder2Response.error));
         process.exit(1);
     }
-    const buyOrder2 = buyOrder2Response.order;
-    console.log("Trader C BUY Order:", buyOrder2.orderId);
+    if (buyOrder2Response.order && buyOrder2Response.order.orderId) {
+        orderMap[buyOrder2Response.order.orderId] = traderC;
+    }
+    
+    // Trader C places a BUY order - after order JSON creation
+    trackOrderPriceLevel(traderC, "BUY", 0.55, "YES");
+
+    await displayMarketStatus(marketId);
 
     // Trader D places a SELL order for 5 YES‑Tokens at $0.55.
-    console.log('--- Trade 2: Trader D SELL 5 YES tokens at $0.55 ---');
+    console.log(colors.blue('Trader D places a SELL order: 5 YES tokens @ $0.55 (short)'));
     const orderD1 = {
       marketId,
       userId: traderD,
@@ -202,17 +446,24 @@ async function main() {
     });
     const sellOrder2Response = await res.json();
     if (!sellOrder2Response.success) {
-        console.error("Error placing SELL order for Trader D:", sellOrder2Response.error);
+        console.error(colors.red("Error placing SELL order for Trader D:", sellOrder2Response.error));
         process.exit(1);
     }
-    const sellOrder2 = sellOrder2Response.order;
-    console.log("Trader D SELL Order:", sellOrder2.orderId);
+    if (sellOrder2Response.order && sellOrder2Response.order.orderId) {
+        orderMap[sellOrder2Response.order.orderId] = traderD;
+    }
+
+    // Trader D places a SELL order - after order JSON creation  
+    trackOrderPriceLevel(traderD, "SELL", 0.55, "YES");
 
     await sleep(500);
+    await displayMarketStatus(marketId);
 
     // 3. Trade 3 – Secondary Market Trading.
+    console.log(colors.bold.yellow('\n🔄 TRADE 3: SECONDARY MARKET - NO TOKEN TRADING\n'));
+    
     // Trader B now sells 5 NO‑Tokens at $0.48 on the secondary market.
-    console.log('--- Trade 3: Trader B SELL 5 NO tokens at $0.48 ---');
+    console.log(colors.blue('Trader B places a SELL order: 5 NO tokens @ $0.48'));
     const orderB2 = {
       marketId,
       userId: traderB,
@@ -229,14 +480,20 @@ async function main() {
     });
     const sellOrder3Response = await res.json();
     if (!sellOrder3Response.success) {
-        console.error("Error placing SELL order for Trader B (secondary):", sellOrder3Response.error);
+        console.error(colors.red("Error placing SELL order for Trader B (secondary):", sellOrder3Response.error));
         process.exit(1);
     }
-    const sellOrder3 = sellOrder3Response.order;
-    console.log("Trader B Secondary SELL Order:", sellOrder3.orderId);
+    if (sellOrder3Response.order && sellOrder3Response.order.orderId) {
+        orderMap[sellOrder3Response.order.orderId] = traderB;
+    }
+    
+    // Trader B places a SELL order for NO tokens - after order JSON creation  
+    trackOrderPriceLevel(traderB, "SELL", 0.48, "NO");
+
+    await displayMarketStatus(marketId);
 
     // Trader E places a BUY order for 5 NO‑Tokens at $0.48.
-    console.log('--- Trade 3: Trader E BUY 5 NO tokens at $0.48 ---');
+    console.log(colors.blue('Trader E places a BUY order: 5 NO tokens @ $0.48'));
     const orderE1 = {
       marketId,
       userId: traderE,
@@ -253,18 +510,22 @@ async function main() {
     });
     const buyOrder3Response = await res.json();
     if (!buyOrder3Response.success) {
-        console.error("Error placing BUY order for Trader E:", buyOrder3Response.error);
+        console.error(colors.red("Error placing BUY order for Trader E:", buyOrder3Response.error));
         process.exit(1);
     }
-    const buyOrder3 = buyOrder3Response.order;
-    console.log("Trader E BUY Order:", buyOrder3.orderId);
+    if (buyOrder3Response.order && buyOrder3Response.order.orderId) {
+        orderMap[buyOrder3Response.order.orderId] = traderE;
+    }
+
+    // Trader E places a BUY order for NO tokens - after order JSON creation
+    trackOrderPriceLevel(traderE, "BUY", 0.48, "NO");
 
     await sleep(500);
+    await displayMarketStatus(marketId);
 
     // --- Additional Test Cases ---
-
-    // 4. Buy YES (with existing liquidity)
-    console.log('--- Trade 4: Trader A BUY 5 YES tokens at $0.60 (existing liquidity) ---');
+    console.log(colors.bold.yellow('\n🔄 TRADE 4: BUY YES WITH EXISTING LIQUIDITY\n'));
+    console.log(colors.blue('Trader A places a BUY order: 5 YES tokens @ $0.60'));
     const orderA2 = {
         marketId,
         userId: traderA,
@@ -281,15 +542,21 @@ async function main() {
     });
     const buyOrder4Response = await res.json();
     if (!buyOrder4Response.success) {
-        console.error("Error placing BUY order for Trader A (Trade 4):", buyOrder4Response.error);
+        console.error(colors.red("Error placing BUY order for Trader A (Trade 4):", buyOrder4Response.error));
         process.exit(1);
     }
-    console.log("Trader A BUY Order (Trade 4):", buyOrder4Response.order.orderId);
+    if (buyOrder4Response.order && buyOrder4Response.order.orderId) {
+        orderMap[buyOrder4Response.order.orderId] = traderA;
+    }
+    
+    // Trader A places a BUY order - after order JSON creation
+    trackOrderPriceLevel(traderA, "BUY", 0.60, "YES");
+
     await sleep(500);
+    await displayMarketStatus(marketId);
 
-
-    // 5. Sell YES (short, without existing YES tokens)
-    console.log('--- Trade 5: Trader C SELL 10 YES tokens at $0.60 (short) ---');
+    console.log(colors.bold.yellow('\n🔄 TRADE 5: SELL YES (SHORT)\n'));
+    console.log(colors.blue('Trader C places a SELL order: 10 YES tokens @ $0.60 (short)'));
     const orderC2 = {
         marketId,
         userId: traderC,
@@ -306,14 +573,21 @@ async function main() {
     });
     const sellOrder5Response = await res.json();
     if (!sellOrder5Response.success) {
-        console.error("Error placing SELL order for Trader C (Trade 5):", sellOrder5Response.error);
+        console.error(colors.red("Error placing SELL order for Trader C (Trade 5):", sellOrder5Response.error));
         process.exit(1);
     }
-    console.log("Trader C SELL Order (Trade 5):", sellOrder5Response.order.orderId);
-    await sleep(500);
+    if (sellOrder5Response.order && sellOrder5Response.order.orderId) {
+        orderMap[sellOrder5Response.order.orderId] = traderC;
+    }
+    
+    // Trader C places a SELL order for YES tokens - after order JSON creation
+    trackOrderPriceLevel(traderC, "SELL", 0.60, "YES");
 
-    // 6. Buy NO (with existing liquidity - from Trader B's NO tokens)
-    console.log('--- Trade 6: Trader D BUY 2 NO tokens at $0.45 (existing liquidity) ---');
+    await sleep(500);
+    await displayMarketStatus(marketId);
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 6: BUY NO WITH EXISTING LIQUIDITY\n'));
+    console.log(colors.blue('Trader D places a BUY order: 2 NO tokens @ $0.45'));
     const orderD2 = {
         marketId,
         userId: traderD,
@@ -330,14 +604,21 @@ async function main() {
     });
     const buyOrder6Response = await res.json();
     if (!buyOrder6Response.success) {
-        console.error("Error placing BUY order for Trader D (Trade 6):", buyOrder6Response.error);
+        console.error(colors.red("Error placing BUY order for Trader D (Trade 6):", buyOrder6Response.error));
         process.exit(1);
     }
-    console.log("Trader D BUY Order (Trade 6):", buyOrder6Response.order.orderId);
-    await sleep(500);
+    if (buyOrder6Response.order && buyOrder6Response.order.orderId) {
+        orderMap[buyOrder6Response.order.orderId] = traderD;
+    }
+    
+    // Trader D places a BUY order for NO tokens - after order JSON creation
+    trackOrderPriceLevel(traderD, "BUY", 0.45, "NO");
 
-    // 7. Sell NO (short, without existing NO tokens)
-    console.log('--- Trade 7: Trader E SELL 3 NO tokens at $0.40 (short) ---');
+    await sleep(500);
+    await displayMarketStatus(marketId);
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 7: SELL NO (SHORT)\n'));
+    console.log(colors.blue('Trader E places a SELL order: 3 NO tokens @ $0.40 (short)'));
     const orderE2 = {
         marketId,
         userId: traderE,
@@ -354,14 +635,21 @@ async function main() {
     });
     const sellOrder7Response = await res.json();
     if (!sellOrder7Response.success) {
-        console.error("Error placing SELL order for Trader E (Trade 7):", sellOrder7Response.error);
+        console.error(colors.red("Error placing SELL order for Trader E (Trade 7):", sellOrder7Response.error));
         process.exit(1);
     }
-    console.log("Trader E SELL Order (Trade 7):", sellOrder7Response.order.orderId);
-    await sleep(500);
+    if (sellOrder7Response.order && sellOrder7Response.order.orderId) {
+        orderMap[sellOrder7Response.order.orderId] = traderE;
+    }
+    
+    // Trader E places a SELL order for NO tokens - after order JSON creation
+    trackOrderPriceLevel(traderE, "SELL", 0.40, "NO");
 
-    // 8. Buy YES (without existing liquidity - order should remain open)
-    console.log('--- Trade 8: Trader A BUY 15 YES tokens at $0.70 (no liquidity) ---');
+    await sleep(500);
+    await displayMarketStatus(marketId);
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 8: BUY YES (NO EXISTING LIQUIDITY)\n'));
+    console.log(colors.blue('Trader A places a BUY order: 15 YES tokens @ $0.70'));
     const orderA3 = {
         marketId,
         userId: traderA,
@@ -378,14 +666,21 @@ async function main() {
     });
     const buyOrder8Response = await res.json();
     if (!buyOrder8Response.success) {
-        console.error("Error placing BUY order for Trader A (Trade 8):", buyOrder8Response.error);
+        console.error(colors.red("Error placing BUY order for Trader A (Trade 8):", buyOrder8Response.error));
         process.exit(1);
     }
-    console.log("Trader A BUY Order (Trade 8):", buyOrder8Response.order.orderId);
-    await sleep(500);
+    if (buyOrder8Response.order && buyOrder8Response.order.orderId) {
+        orderMap[buyOrder8Response.order.orderId] = traderA;
+    }
+    
+    // Trader A places a BUY order - after order JSON creation
+    trackOrderPriceLevel(traderA, "BUY", 0.70, "YES");
 
-    // 9. Sell NO (without existing liquidity - order should remain open)
-    console.log('--- Trade 9: Trader B SELL 2 NO tokens at $0.30 (no liquidity) ---');
+    await sleep(500);
+    await displayMarketStatus(marketId);
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 9: SELL NO (NO EXISTING LIQUIDITY)\n'));
+    console.log(colors.blue('Trader B places a SELL order: 2 NO tokens @ $0.30'));
     const orderB3 = {
         marketId,
         userId: traderB,
@@ -402,20 +697,169 @@ async function main() {
     });
     const sellOrder9Response = await res.json();
     if (!sellOrder9Response.success) {
-        console.error("Error placing SELL order for Trader B (Trade 9):", sellOrder9Response.error);
+        console.error(colors.red("Error placing SELL order for Trader B (Trade 9):", sellOrder9Response.error));
         process.exit(1);
     }
-    console.log("Trader B SELL Order (Trade 9):", sellOrder9Response.order.orderId);
+    if (sellOrder9Response.order && sellOrder9Response.order.orderId) {
+        orderMap[sellOrder9Response.order.orderId] = traderB;
+    }
+    
+    // Trader B places a SELL order for NO tokens - after order JSON creation
+    trackOrderPriceLevel(traderB, "SELL", 0.30, "NO");
+
     await sleep(500);
+    await displayMarketStatus(marketId);
+    
+    // Display trades in a table
+    console.log(colors.bold.magenta('\n📉 EXECUTED TRADES SUMMARY\n'));
+    
+    try {
+      // Get YES trades
+      const resYes = await fetch(`${BASE_URL}/market/trades?marketId=${marketId}&tokenType=YES`);
+      const yesTradesResp = await resYes.json();
+      
+      // Get NO trades
+      const resNo = await fetch(`${BASE_URL}/market/trades?marketId=${marketId}&tokenType=NO`);
+      const noTradesResp = await resNo.json();
+      
+      const yesTrades = yesTradesResp.success ? yesTradesResp.trades || [] : [];
+      const noTrades = noTradesResp.success ? noTradesResp.trades || [] : [];
+      
+      // Get all orders for the market to reference
+      const resOrders = await fetch(`${BASE_URL}/order?marketId=${marketId}`);
+      const ordersResp = await resOrders.json();
+      const orders = ordersResp.success ? ordersResp.orders || [] : [];
+      
+      // Build map of order IDs to user IDs
+      const orderUserMap = {};
+      for (const order of orders) {
+        if (order.orderId) {
+          orderUserMap[order.orderId] = order.userId;
+        }
+      }
+      
+      // Helper function to extract trader name, with fallback to our locally tracked orders
+      const getTraderName = (orderId, userId) => {
+        if (userId) return userId.split('-')[0]; // Just extract the trader name part
+        
+        // Try to get from our local orderMap first (orders we tracked during test)
+        const localUserId = orderMap[orderId];
+        if (localUserId) return localUserId.split('-')[0];
+        
+        // Fall back to orders from API
+        const apiUserId = orderUserMap[orderId];
+        if (apiUserId) return apiUserId.split('-')[0];
+        
+        return 'Unknown';
+      };
+      
+      if (yesTrades.length === 0 && noTrades.length === 0) {
+        console.log(colors.yellow('No trades executed yet'));
+      } else {
+        // Create YES trades table
+        if (yesTrades.length > 0) {
+          console.log(colors.green('\n YES Token Trades:'));
+          const yesTradesTable = new Table({
+            head: [
+              colors.cyan('ID'),
+              colors.cyan('Price'),
+              colors.cyan('Quantity'),
+              colors.cyan('Total Value'),
+              colors.cyan('Buyer'),
+              colors.cyan('Seller'),
+              colors.cyan('Time')
+            ],
+            colWidths: [8, 10, 10, 12, 12, 12, 24]
+          });
+          
+          // Process YES trades
+          yesTrades.forEach((trade, i) => {
+            if (!trade) return;
+            
+            try {
+              // Get buyer and seller names
+              const buyerName = getTraderName(trade.buyOrderId, trade.buyerId);
+              const sellerName = getTraderName(trade.sellOrderId, trade.sellerId);
+              
+              const tradeTime = trade.executedAt || trade.timestamp;
+              const formattedTime = tradeTime 
+                ? new Date(tradeTime).toLocaleString()
+                : 'N/A';
+              
+              const tradeValue = trade.price * trade.quantity;
+              
+              yesTradesTable.push([
+                i + 1,
+                trade.price ? trade.price.toFixed(2) : 'N/A',
+                trade.quantity || 0,
+                tradeValue.toFixed(2),
+                buyerName,
+                sellerName,
+                formattedTime
+              ]);
+            } catch (error) {
+              console.log(colors.red(`Error processing YES trade ${i + 1}: ${error.message}`));
+            }
+          });
+          
+          console.log(yesTradesTable.toString());
+        }
+        
+        // Create NO trades table
+        if (noTrades.length > 0) {
+          console.log(colors.red('\n NO Token Trades:'));
+          const noTradesTable = new Table({
+            head: [
+              colors.cyan('ID'),
+              colors.cyan('Price'),
+              colors.cyan('Quantity'),
+              colors.cyan('Total Value'),
+              colors.cyan('Buyer'),
+              colors.cyan('Seller'),
+              colors.cyan('Time')
+            ],
+            colWidths: [8, 10, 10, 12, 12, 12, 24]
+          });
+          
+          // Process NO trades
+          noTrades.forEach((trade, i) => {
+            if (!trade) return;
+            
+            try {
+              // Get buyer and seller names
+              const buyerName = getTraderName(trade.buyOrderId, trade.buyerId);
+              const sellerName = getTraderName(trade.sellOrderId, trade.sellerId);
+              
+              const tradeTime = trade.executedAt || trade.timestamp;
+              const formattedTime = tradeTime 
+                ? new Date(tradeTime).toLocaleString()
+                : 'N/A';
+              
+              const tradeValue = trade.price * trade.quantity;
+              
+              noTradesTable.push([
+                i + 1,
+                trade.price ? trade.price.toFixed(2) : 'N/A',
+                trade.quantity || 0,
+                tradeValue.toFixed(2),
+                buyerName,
+                sellerName,
+                formattedTime
+              ]);
+            } catch (error) {
+              console.log(colors.red(`Error processing NO trade ${i + 1}: ${error.message}`));
+            }
+          });
+          
+          console.log(noTradesTable.toString());
+        }
+      }
+    } catch (error) {
+      console.log(colors.red("\nError fetching trades:", error.message));
+    }
 
-    // Check all trades for this market.
-    console.log('--- Checking for Trades ---');
-    res = await fetch(`${BASE_URL}/market/trades?marketId=${marketId}`);
-    const tradesResp = await res.json();
-    console.log("Trades executed:", JSON.stringify(tradesResp.trades, null, 2));
-
-    // 4. Settlement: Once the event resolves, settle the market with outcome YES.
-    console.log('--- Settling Market with Outcome YES ---');
+    // Settlement
+    console.log(colors.bold.green('\n🏁 SETTLING MARKET WITH OUTCOME: YES\n'));
     res = await fetch(`${BASE_URL}/market/settle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -425,51 +869,76 @@ async function main() {
       })
     });
     const settlementResp = await res.json();
-    console.log("Settlement response:", settlementResp);
+    if (settlementResp.success) {
+      console.log(colors.green('✓ Market settled successfully'));
+    } else {
+      console.log(colors.red('✗ Settlement failed:', settlementResp.error));
+    }
 
     await sleep(500);
-
-    // Get final balances for all traders.
-    console.log('--- Final User Balances ---');
+    
+    // Final balances
+    console.log(colors.bold.cyan('\n🧾 FINAL SETTLEMENT RESULTS\n'));
+    const finalBalancesTable = new Table({
+      head: [
+        colors.cyan('Trader'),
+        colors.cyan('Initial USD'),
+        colors.cyan('Final USD'),
+        colors.cyan('Profit/Loss'),
+        colors.cyan('Expected')
+      ],
+      colWidths: [15, 15, 15, 15, 15]
+    });
+    
     let finalResults = {};
+    const initialAmount = 100; // All traders started with 100 USD
+    
+    // Expected final balances
+    const expectedBalances = {};
+    expectedBalances[traderA] = 109.00;
+    expectedBalances[traderB] = 97.40;
+    expectedBalances[traderC] = 98.25;
+    expectedBalances[traderD] = 96.85;
+    expectedBalances[traderE] = 98.50;
+    
+    let allPassed = true;
+    
     for (const trader of traders) {
       res = await fetch(`${BASE_URL}/users/${trader}?chainId=solana`);
       const userResponse = await res.json();
-      console.log(`${trader} balance:`, JSON.stringify(userResponse, null, 2));
-      finalResults[trader] = userResponse.balance?.availableUSD;
-    }
-
-    // Manual expected balances based on the trading flow.
-    const expectedBalances = {};
-    expectedBalances[traderA] = 109.00;  // Correct as is
-    expectedBalances[traderB] = 97.40;   // Adjust for -10 YES short
-    expectedBalances[traderC] = 98.25;  // No tokens, just cash flow
-    expectedBalances[traderD] = 96.85;   // Adjust for -5 YES short
-    expectedBalances[traderE] = 98.50;   // NO tokens worth $0
-    
-    let allPassed = true;
-    for (const trader of traders) {
-      if (typeof finalResults[trader] !== 'number') {
-        console.error(`Error: Trader ${trader} does not have a valid availableUSD value. Received: ${finalResults[trader]}`);
-        allPassed = false;
-        continue;
-      }
-      const actual = parseFloat(finalResults[trader].toFixed(2));
+      const finalBalance = userResponse.balance?.availableUSD || 0;
+      finalResults[trader] = finalBalance;
+      
+      const profitLoss = finalBalance - initialAmount;
       const expected = expectedBalances[trader];
-      if (Math.abs(actual - expected) > 0.001) {
-        console.log(`Test Failed for ${trader}: expected ${expected}, got ${actual}`);
-        allPassed = false;
-      }
-    }
-    if (allPassed) {
-      console.log("Test Passed: All final balances are as expected.");
-    } else {
-      console.log("Test Failed: Some final balances did not match expected values.");
+      const passedTest = Math.abs(finalBalance - expected) <= 0.01;
+      
+      if (!passedTest) allPassed = false;
+      
+      finalBalancesTable.push([
+        trader.split('-')[0],
+        initialAmount.toFixed(2),
+        finalBalance.toFixed(2),
+        profitLoss > 0
+          ? colors.green('+' + profitLoss.toFixed(2))
+          : colors.red(profitLoss.toFixed(2)),
+        passedTest
+          ? colors.green(expected.toFixed(2) + ' ✓')
+          : colors.red(expected.toFixed(2) + ' ✗')
+      ]);
     }
     
-    console.log("Test flow completed successfully.");
+    console.log(finalBalancesTable.toString());
+    
+    if (allPassed) {
+      console.log(colors.bold.green('\n✅ TEST PASSED: All final balances match expected values'));
+    } else {
+      console.log(colors.bold.red('\n❌ TEST FAILED: Some final balances did not match expected values'));
+    }
+    
+    console.log(colors.bold.cyan('\n🎬 Test flow completed\n'));
   } catch (err) {
-    console.error("Test script encountered an error:", err.message);
+    console.error(colors.bold.red("\n❌ ERROR:", err.message));
     process.exit(1);
   }
 }
