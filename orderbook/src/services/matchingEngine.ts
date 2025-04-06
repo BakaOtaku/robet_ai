@@ -170,7 +170,7 @@ async function executeTrade(
 
   let sellerMarket = sellerBal.markets.find((m: { marketId: string; }) => m.marketId === marketId);
   if (!sellerMarket) {
-    console.warn(`No market balance found for seller ${sellerBal.userId} in market ${marketId}. Creating one.`);
+    console.warn(`[Execute Trade] No market balance found for seller ${sellerBal.userId} in market ${marketId}. Creating one.`);
     sellerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedYesTokens: 0, lockedNoTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
     sellerBal.markets.push(sellerMarket);
   } else {
@@ -205,7 +205,6 @@ async function executeTrade(
       // Use any available locked tokens first (can happen in partial fills)
       if (sellerMarket.lockedYesTokens > 0) {
           const useLocked = Math.min(quantity, sellerMarket.lockedYesTokens);
-          console.log(`[Trade Execution] Seller ${sellerBal.userId} using ${useLocked} remaining locked YES tokens.`);
           sellerMarket.lockedYesTokens -= useLocked;
           buyerMarket.yesTokens += useLocked;
           remainingToShort -= useLocked;
@@ -213,7 +212,6 @@ async function executeTrade(
 
       if (remainingToShort > 0) {
           // This portion must be covered by locked collateral (short sale)
-          console.log(`[Trade Execution] Seller ${sellerBal.userId} fulfilling ${remainingToShort} YES via short sale using locked collateral.`);
           if (sellerMarket.lockedCollateralYes < remainingToShort) {
               console.error(`[Trade Execution Error] Seller ${sellerBal.userId} has insufficient lockedCollateralYes (${sellerMarket.lockedCollateralYes}) to cover short sale of ${remainingToShort} YES.`);
               // TODO: Handle this critical error state - potentially revert trade?
@@ -245,7 +243,6 @@ async function executeTrade(
 
       if (remainingToShort > 0) {
           // This portion must be covered by locked collateral (short sale)
-          console.log(`[Trade Execution] Seller ${sellerBal.userId} fulfilling ${remainingToShort} NO via short sale using locked collateral.`);
           if (sellerMarket.lockedCollateralNo < remainingToShort) {
               console.error(`[Trade Execution Error] Seller ${sellerBal.userId} has insufficient lockedCollateralNo (${sellerMarket.lockedCollateralNo}) to cover short sale of ${remainingToShort} NO.`);
               // TODO: Handle this critical error state
@@ -276,7 +273,7 @@ async function executeTrade(
 
   try {
     await Promise.all([buyerBal.save(), sellerBal.save()]);
-    console.log(`[Trade Execution] Balances saved for trade. Seller: ${sellerBal.userId}, Buyer: ${buyerBal.userId}. Seller Locked - YES Tokens: ${sellerMarket.lockedYesTokens}, NO Tokens: ${sellerMarket.lockedNoTokens}, YES Collateral: ${sellerMarket.lockedCollateralYes}, NO Collateral: ${sellerMarket.lockedCollateralNo}`);
+    console.log(`[Trade Execution] Balances saved for trade between buyer ${buyerBal.userId} and seller ${sellerBal.userId}.`);
   } catch(error) {
     console.error(`[Trade Execution] Error saving balances for trade between ${buyerBal.userId} and ${sellerBal.userId}:`, error);
     // TODO: Consider how to handle save failures - potential inconsistency

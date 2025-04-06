@@ -13,16 +13,32 @@ const orderRouter = Router();
  */
 orderRouter.post("/", verifySignature, async (req: any, res: any) => {
   try {
-    let { marketId, userId, side, price, quantity } = req.body;
+    let { marketId, userId, side, quantity } = req.body;
+    let rawPrice = req.body.price; // Get the raw price first
     const tokenType: OrderTokenType = req.body.tokenType || "YES";
 
     userId = userId.toLowerCase();
 
+    // --- Price Validation and Truncation ---
+    let price: number;
+    if (typeof rawPrice !== 'number' || isNaN(rawPrice)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid price provided." });
+    }
+    // Truncate to 2 decimal places (e.g., 0.119 -> 0.11)
+    price = Math.floor(rawPrice * 100) / 100;
+    // Alternatively, round to nearest 2 decimal places:
+    // price = Math.round(rawPrice * 100) / 100;
+    // Choose truncation or rounding based on desired behavior. Truncation used here.
+
+
     if (price < 0 || price > 1) {
       return res
         .status(400)
-        .json({ success: false, error: "Price must be between 0 and 1." });
+        .json({ success: false, error: `Processed price (${price}) must be between 0 and 1.` });
     }
+
     if (quantity <= 0) {
       return res
         .status(400)
@@ -52,6 +68,7 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
 
     // --- Fund Locking Logic ---
     if (side === "BUY") {
+      // Use the processed (truncated/rounded) price for calculations
       const requiredFunds = price * quantity;
       if (userBalance.availableUSD < requiredFunds) {
         return res.status(400).json({
@@ -63,7 +80,7 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
       userBalance.availableUSD -= requiredFunds;
       // TODO: Add a mechanism to track these locked funds (e.g., a new field `lockedUSD`)
       //       and release them upon order cancellation/completion.
-      console.log(`BUY Order: Locking $${requiredFunds.toFixed(2)} from user ${userId}. New available USD: $${userBalance.availableUSD.toFixed(2)}`);
+      console.log(`BUY Order: Locking $${requiredFunds.toFixed(2)} from user ${userId} for ${quantity} @ ${price}. New available USD: $${userBalance.availableUSD.toFixed(2)}`);
 
     } else if (side === "SELL") {
       // Use the index to access the market balance object directly
@@ -127,7 +144,7 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
     await userBalance.save();
 
 
-    // Create the limit order.
+    // Create the limit order using the processed price.
     const orderId = uuidv4();
     const newOrder = await Order.create({
       orderId,
@@ -135,14 +152,14 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
       userId,
       side,
       tokenType,
-      price,
+      price, // Use the truncated/rounded price here
       quantity,
       filledQuantity: 0,
       status: "OPEN",
     });
 
     // Attempt to match the order.
-    await matchOrders(newOrder);
+    await matchOrders(newOrder); // matchOrders will use the processed price from newOrder
 
     return res.json({ success: true, order: newOrder });
   } catch (error) {
