@@ -97,14 +97,16 @@ function sleep(ms) {
 async function displayUserBalances(traders, marketId) {
   const table = new Table({
     head: [
-      colors.cyan('Trader'), 
-      colors.cyan('USD Balance'), 
-      colors.green('YES Tokens'), 
-      colors.red('NO Tokens'),
-      colors.yellow('YES Locked'),
-      colors.yellow('NO Locked')
+      colors.cyan('Trader'),
+      colors.cyan('USD Bal'),
+      colors.green('YES Avail'),
+      colors.red('NO Avail'),
+      colors.yellow('YES Locked'), // Renamed for clarity (Tokens)
+      colors.yellow('NO Locked'),  // Renamed for clarity (Tokens)
+      colors.magenta('YES Collateral'), // New column
+      colors.magenta('NO Collateral')   // New column
     ],
-    colWidths: [12, 12, 12, 12, 12, 12]
+    colWidths: [12, 10, 11, 10, 11, 10, 15, 15] // Adjusted widths
   });
 
   for (const trader of traders) {
@@ -124,10 +126,12 @@ async function displayUserBalances(traders, marketId) {
     table.push([
       trader.split('-')[0], // Just show the trader name without timestamp
       balance.availableUSD?.toFixed(2) || '0.00',
-      marketBalance?.yesTokens?.toString() || '0',
-      marketBalance?.noTokens?.toString() || '0',
-      marketBalance?.lockedCollateralYes?.toFixed(2) || '0.00',
-      marketBalance?.lockedCollateralNo?.toFixed(2) || '0.00'
+      marketBalance?.yesTokens?.toString() || '0', // Available YES
+      marketBalance?.noTokens?.toString() || '0',  // Available NO
+      marketBalance?.lockedYesTokens?.toString() || '0', // Locked YES Tokens
+      marketBalance?.lockedNoTokens?.toString() || '0',  // Locked NO Tokens
+      marketBalance?.lockedCollateralYes?.toFixed(2) || '0.00', // Locked YES Collateral
+      marketBalance?.lockedCollateralNo?.toFixed(2) || '0.00'  // Locked NO Collateral
     ]);
   }
   

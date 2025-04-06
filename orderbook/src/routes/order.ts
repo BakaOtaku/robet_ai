@@ -43,6 +43,8 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
         noTokens: 0,
         lockedCollateralYes: 0,
         lockedCollateralNo: 0,
+        lockedYesTokens: 0,
+        lockedNoTokens: 0,
       };
       userBalance.markets.push(newMarketBalance);
       marketBalanceIndex = userBalance.markets.length - 1; // Index of the newly added market
@@ -67,41 +69,61 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
       // Use the index to access the market balance object directly
       const currentMarketBalance = userBalance.markets[marketBalanceIndex];
 
-      // Collateral locking for short selling (existing logic)
+      // Logic for locking assets for SELL orders
       if (tokenType === "YES") {
         const ownedYes = currentMarketBalance.yesTokens;
-        if (quantity > ownedYes) {
-          const shortAmount = quantity - ownedYes;
+        if (quantity <= ownedYes) {
+          // Lock existing YES tokens
+          currentMarketBalance.yesTokens -= quantity;
+          currentMarketBalance.lockedYesTokens = (currentMarketBalance.lockedYesTokens || 0) + quantity; // Initialize if undefined
+        } else {
+          // Lock collateral for short selling YES tokens
+          const shortAmount = quantity - ownedYes; // Amount to short
           const requiredCollateral = shortAmount; // $1 per shorted YES share
           if (userBalance.availableUSD < requiredCollateral) {
             return res.status(400).json({
               success: false,
-              error: `Insufficient funds for short-selling YES tokens. Requires $${requiredCollateral} collateral.`,
+              error: `Insufficient funds for short-selling YES tokens. Requires $${requiredCollateral} collateral, available: $${userBalance.availableUSD.toFixed(2)}.`,
             });
           }
+          // Lock owned tokens first, if any
+          if (ownedYes > 0) {
+             currentMarketBalance.yesTokens -= ownedYes;
+             currentMarketBalance.lockedYesTokens = (currentMarketBalance.lockedYesTokens || 0) + ownedYes;
+          }
+          // Lock collateral for the short portion
           userBalance.availableUSD -= requiredCollateral;
-          // Update directly using the index
-          userBalance.markets[marketBalanceIndex].lockedCollateralYes += requiredCollateral;
+          currentMarketBalance.lockedCollateralYes = (currentMarketBalance.lockedCollateralYes || 0) + requiredCollateral; // Initialize if undefined
         }
       } else if (tokenType === "NO") {
         const ownedNo = currentMarketBalance.noTokens;
-        if (quantity > ownedNo) {
-          const shortAmount = quantity - ownedNo;
+        if (quantity <= ownedNo) {
+          // Lock existing NO tokens
+          currentMarketBalance.noTokens -= quantity;
+          currentMarketBalance.lockedNoTokens = (currentMarketBalance.lockedNoTokens || 0) + quantity; // Initialize if undefined
+        } else {
+          // Lock collateral for short selling NO tokens
+          const shortAmount = quantity - ownedNo; // Amount to short
           const requiredCollateral = shortAmount; // $1 per shorted NO share
           if (userBalance.availableUSD < requiredCollateral) {
             return res.status(400).json({
               success: false,
-              error: `Insufficient funds for short-selling NO tokens. Requires $${requiredCollateral} collateral.`,
+              error: `Insufficient funds for short-selling NO tokens. Requires $${requiredCollateral} collateral, available: $${userBalance.availableUSD.toFixed(2)}.`,
             });
           }
+          // Lock owned tokens first, if any
+          if (ownedNo > 0) {
+             currentMarketBalance.noTokens -= ownedNo;
+             currentMarketBalance.lockedNoTokens = (currentMarketBalance.lockedNoTokens || 0) + ownedNo;
+          }
+           // Lock collateral for the short portion
           userBalance.availableUSD -= requiredCollateral;
-          // Update directly using the index
-          userBalance.markets[marketBalanceIndex].lockedCollateralNo += requiredCollateral;
+          currentMarketBalance.lockedCollateralNo = (currentMarketBalance.lockedCollateralNo || 0) + requiredCollateral; // Initialize if undefined
         }
       }
     }
     userBalance.markModified('markets');
-    // Save user balance updates (fund/collateral locking)
+    // Save user balance updates (fund/collateral/token locking)
     await userBalance.save();
 
 
