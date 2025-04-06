@@ -709,7 +709,122 @@ async function main() {
 
     await sleep(500);
     await displayMarketStatus(marketId);
-    
+
+    // --- Self-Trading Test Cases ---
+    console.log(colors.bold.yellow('\n🔄 TRADE 10: SELF-TRADE SETUP (YES) - A SELLS\n'));
+    console.log(colors.blue('Trader A places a SELL order: 5 YES tokens @ $0.65'));
+    const orderA4_sell = {
+        marketId,
+        userId: traderA,
+        side: "SELL",
+        price: 0.65,
+        quantity: 5,
+        tokenType: "YES",
+        ...signOrder(traderA, marketId, "SELL", 0.65, 5, "YES")
+    };
+    res = await fetch(`${BASE_URL}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderA4_sell)
+    });
+    const sellOrder10Response = await res.json();
+    if (!sellOrder10Response.success) {
+        console.error(colors.red("Error placing SELL order for Trader A (Trade 10):", sellOrder10Response.error));
+        process.exit(1);
+    }
+    if (sellOrder10Response.order && sellOrder10Response.order.orderId) {
+        orderMap[sellOrder10Response.order.orderId] = traderA;
+    }
+    trackOrderPriceLevel(traderA, "SELL", 0.65, "YES");
+
+    await displayMarketStatus(marketId); // Display after sell order placed
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 11: SELF-TRADE ATTEMPT (YES) - A BUYS\n'));
+    console.log(colors.blue('Trader A places a BUY order: 5 YES tokens @ $0.65'));
+    const orderA4_buy = {
+        marketId,
+        userId: traderA,
+        side: "BUY",
+        price: 0.65,
+        quantity: 5,
+        tokenType: "YES",
+        ...signOrder(traderA, marketId, "BUY", 0.65, 5, "YES")
+    };
+    res = await fetch(`${BASE_URL}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderA4_buy)
+    });
+    const buyOrder11Response = await res.json();
+    if (!buyOrder11Response.success) {
+        console.error(colors.red("Error placing BUY order for Trader A (Trade 11):", buyOrder11Response.error));
+        process.exit(1);
+    }
+    if (buyOrder11Response.order && buyOrder11Response.order.orderId) {
+        orderMap[buyOrder11Response.order.orderId] = traderA;
+    }
+    trackOrderPriceLevel(traderA, "BUY", 0.65, "YES");
+
+    await sleep(500); // Allow time for potential matching
+    await displayMarketStatus(marketId); // Display after buy order placed (potential match)
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 12: SELF-TRADE SETUP (NO) - B BUYS\n'));
+    console.log(colors.blue('Trader B places a BUY order: 3 NO tokens @ $0.35'));
+    const orderB4_buy = {
+        marketId,
+        userId: traderB,
+        side: "BUY",
+        price: 0.35,
+        quantity: 3,
+        tokenType: "NO",
+        ...signOrder(traderB, marketId, "BUY", 0.35, 3, "NO")
+    };
+    res = await fetch(`${BASE_URL}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderB4_buy)
+    });
+    const buyOrder12Response = await res.json();
+    if (!buyOrder12Response.success) {
+        console.error(colors.red("Error placing BUY order for Trader B (Trade 12):", buyOrder12Response.error));
+        process.exit(1);
+    }
+    if (buyOrder12Response.order && buyOrder12Response.order.orderId) {
+        orderMap[buyOrder12Response.order.orderId] = traderB;
+    }
+    trackOrderPriceLevel(traderB, "BUY", 0.35, "NO");
+
+    await displayMarketStatus(marketId); // Display after buy order placed
+
+    console.log(colors.bold.yellow('\n🔄 TRADE 13: SELF-TRADE ATTEMPT (NO) - B SELLS\n'));
+    console.log(colors.blue('Trader B places a SELL order: 3 NO tokens @ $0.35'));
+    const orderB4_sell = {
+        marketId,
+        userId: traderB,
+        side: "SELL",
+        price: 0.35,
+        quantity: 3,
+        tokenType: "NO",
+        ...signOrder(traderB, marketId, "SELL", 0.35, 3, "NO")
+    };
+    res = await fetch(`${BASE_URL}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderB4_sell)
+    });
+    const sellOrder13Response = await res.json();
+    if (!sellOrder13Response.success) {
+        console.error(colors.red("Error placing SELL order for Trader B (Trade 13):", sellOrder13Response.error));
+        process.exit(1);
+    }
+    if (sellOrder13Response.order && sellOrder13Response.order.orderId) {
+        orderMap[sellOrder13Response.order.orderId] = traderB;
+    }
+    trackOrderPriceLevel(traderB, "SELL", 0.35, "NO");
+
+    await sleep(500); // Allow time for potential matching
+    await displayMarketStatus(marketId); // Display after sell order placed (potential match)
+
     // Display trades in a table
     console.log(colors.bold.magenta('\n📉 EXECUTED TRADES SUMMARY\n'));
     

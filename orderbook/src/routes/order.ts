@@ -34,22 +34,42 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
     if (!userBalance) {
       return res.status(400).json({ success: false, error: "User not found." });
     }
-    let marketBalance = userBalance.markets.find((m) => m.marketId === marketId);
-    if (!marketBalance) {
-      marketBalance = {
+    // Find the index of the market balance, or add a new one if not found
+    let marketBalanceIndex = userBalance.markets.findIndex((m) => m.marketId === marketId);
+    if (marketBalanceIndex === -1) {
+      const newMarketBalance = {
         marketId,
         yesTokens: 0,
         noTokens: 0,
         lockedCollateralYes: 0,
         lockedCollateralNo: 0,
       };
-      userBalance.markets.push(marketBalance);
+      userBalance.markets.push(newMarketBalance);
+      marketBalanceIndex = userBalance.markets.length - 1; // Index of the newly added market
     }
 
-    // For SELL orders, enforce collateral if the seller does not hold enough tokens.
-    if (side === "SELL") {
+    // --- Fund Locking Logic ---
+    if (side === "BUY") {
+      const requiredFunds = price * quantity;
+      if (userBalance.availableUSD < requiredFunds) {
+        return res.status(400).json({
+          success: false,
+          error: `Insufficient funds for BUY order. Requires $${requiredFunds.toFixed(2)}, available: $${userBalance.availableUSD.toFixed(2)}. `,
+        });
+      }
+      // Deduct funds at order placement
+      userBalance.availableUSD -= requiredFunds;
+      // TODO: Add a mechanism to track these locked funds (e.g., a new field `lockedUSD`)
+      //       and release them upon order cancellation/completion.
+      console.log(`BUY Order: Locking $${requiredFunds.toFixed(2)} from user ${userId}. New available USD: $${userBalance.availableUSD.toFixed(2)}`);
+
+    } else if (side === "SELL") {
+      // Use the index to access the market balance object directly
+      const currentMarketBalance = userBalance.markets[marketBalanceIndex];
+
+      // Collateral locking for short selling (existing logic)
       if (tokenType === "YES") {
-        const ownedYes = marketBalance.yesTokens;
+        const ownedYes = currentMarketBalance.yesTokens;
         if (quantity > ownedYes) {
           const shortAmount = quantity - ownedYes;
           const requiredCollateral = shortAmount; // $1 per shorted YES share
@@ -60,10 +80,11 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
             });
           }
           userBalance.availableUSD -= requiredCollateral;
-          marketBalance.lockedCollateralYes += requiredCollateral;
+          // Update directly using the index
+          userBalance.markets[marketBalanceIndex].lockedCollateralYes += requiredCollateral;
         }
       } else if (tokenType === "NO") {
-        const ownedNo = marketBalance.noTokens;
+        const ownedNo = currentMarketBalance.noTokens;
         if (quantity > ownedNo) {
           const shortAmount = quantity - ownedNo;
           const requiredCollateral = shortAmount; // $1 per shorted NO share
@@ -74,15 +95,15 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
             });
           }
           userBalance.availableUSD -= requiredCollateral;
-          marketBalance.lockedCollateralNo += requiredCollateral;
+          // Update directly using the index
+          userBalance.markets[marketBalanceIndex].lockedCollateralNo += requiredCollateral;
         }
       }
     }
-    
-    // (For BUY orders, the buyer's available funds will be checked during trade execution.)
-
-    // Save any user balance updates due to collateral locking before order creation.
+    userBalance.markModified('markets');
+    // Save user balance updates (fund/collateral locking)
     await userBalance.save();
+
 
     // Create the limit order.
     const orderId = uuidv4();
@@ -97,11 +118,9 @@ orderRouter.post("/", verifySignature, async (req: any, res: any) => {
       filledQuantity: 0,
       status: "OPEN",
     });
-    console.log("newOrder", newOrder);
 
     // Attempt to match the order.
     await matchOrders(newOrder);
-    console.log("newOrder after matching", newOrder);
 
     return res.json({ success: true, order: newOrder });
   } catch (error) {
