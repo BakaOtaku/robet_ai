@@ -7,10 +7,10 @@ import crypto from "crypto";
 
 // Chain configuration
 export const CHAIN_ID = "xion-testnet-1";
-const rpcEndpoint = "https://rpc.xion-testnet-1.burnt.com:443";
-const lcdEndpoint = "https://api.xion-testnet-1.burnt.com";
+const rpcEndpoint = "https://rpc.xion-testnet-2.burnt.com:443";
+const lcdEndpoint = "https://api.xion-testnet-2.burnt.com";
 const contractAddress =
-  "xion1ys6n97h8y9s8ncmlqhjh2wswn8mgqul45j9fatqznvkfeuyqm6pqfwf3sw";
+  "xion1n7f356d5u6u0q8w98q58m5jl6q7770hkcpujqycm72scmum6yckq70t2hr";
 
 // Interface for deposit events
 interface XionDepositEvent {
@@ -143,7 +143,7 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
   }
 
   const events = txData.tx_response.events || [];
-  
+
   // Find deposit events from event logs
   const depositEvents = events.filter(
     (event: any) =>
@@ -166,7 +166,7 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
     }
 
     const messages = txData.tx.body.messages;
-    
+
     // Check for direct contract call with funds
     const directContractMsg = messages.find(
       (msg: any) =>
@@ -232,7 +232,7 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
         ];
       }
     }
-    
+
     return [];
   }
 
@@ -274,7 +274,7 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
     // If needed attributes not found in event data, try to extract from transaction body
     if ((!amount || !userAddress) && txData.tx?.body?.messages) {
       const messages = txData.tx.body.messages;
-      
+
       // Check direct contract call
       const directContractMsg = messages.find(
         (msg: any) =>
@@ -290,7 +290,7 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
           if (!tokenAddress) tokenAddress = directContractMsg.funds[0].denom;
         }
       }
-      
+
       // Check authz execution
       if (!userAddress || !amount) {
         const authzMsg = messages.find(
@@ -309,7 +309,8 @@ function extractDepositEvents(txData: any, txHash: string): XionDepositEvent[] {
 
             if (!amount && nestedContractMsg.funds?.length > 0) {
               amount = nestedContractMsg.funds[0].amount;
-              if (!tokenAddress) tokenAddress = nestedContractMsg.funds[0].denom;
+              if (!tokenAddress)
+                tokenAddress = nestedContractMsg.funds[0].denom;
             }
           }
         }
@@ -455,15 +456,20 @@ async function isTransactionForContract(
       );
 
       if (hasDirectContractMsg) {
-        xionLogger.info(`Found direct contract transaction ${txHash.slice(0, 10)}...`);
+        xionLogger.info(
+          `Found direct contract transaction ${txHash.slice(0, 10)}...`
+        );
         return true;
       }
 
       // Check for contract execution via authz
       const hasAuthzContractMsg = messages.some((msg: any) => {
-        if (msg["@type"] === "/cosmos.authz.v1beta1.MsgExec" && Array.isArray(msg.msgs)) {
+        if (
+          msg["@type"] === "/cosmos.authz.v1beta1.MsgExec" &&
+          Array.isArray(msg.msgs)
+        ) {
           return msg.msgs.some((nestedMsg: any) => {
-            if (typeof nestedMsg === 'object' && nestedMsg !== null) {
+            if (typeof nestedMsg === "object" && nestedMsg !== null) {
               return (
                 nestedMsg["@type"] === "/cosmwasm.wasm.v1.MsgExecuteContract" &&
                 nestedMsg.contract === targetContract
@@ -476,7 +482,9 @@ async function isTransactionForContract(
       });
 
       if (hasAuthzContractMsg) {
-        xionLogger.info(`Found authz contract transaction ${txHash.slice(0, 10)}...`);
+        xionLogger.info(
+          `Found authz contract transaction ${txHash.slice(0, 10)}...`
+        );
         return true;
       }
     }
