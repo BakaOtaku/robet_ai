@@ -1,6 +1,6 @@
 import { Order, IOrder } from "../models/Order";
 import { Trade } from "../models/Trade";
-import { UserBalance } from "../models/UserBalance";
+import { IUserBalance, UserBalance } from "../models/UserBalance";
 import { v4 as uuidv4 } from "uuid";
 
 /**
@@ -16,10 +16,10 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
     let sortOption: any;
 
     if (incomingOrder.side === "BUY") {
-      priceFilter = incomingOrder.price;
+      priceFilter = { $lte: incomingOrder.price };
       sortOption = { price: 1, createdAt: 1 };
     } else {
-      priceFilter = incomingOrder.price;
+      priceFilter = { $gte: incomingOrder.price };
       sortOption = { price: -1, createdAt: 1 };
     }
 
@@ -28,13 +28,10 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
       side: oppositeSide,
       tokenType: incomingOrder.tokenType,
       status: { $in: ["OPEN", "PARTIAL"] },
-      price:
-        incomingOrder.side === "BUY"
-          ? { $lte: priceFilter }
-          : { $gte: priceFilter },
+      price: priceFilter,
+      userId: { $ne: incomingOrder.userId }
     }).sort(sortOption).exec();
 
-    console.log("bestOpposingOrder", bestOpposingOrder);
     if (!bestOpposingOrder) {
       stillOpen = false;
       break;
@@ -42,6 +39,7 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
 
     const availableQty = bestOpposingOrder.quantity - bestOpposingOrder.filledQuantity;
     if (availableQty <= 0) {
+      console.warn(`[Matching Engine] Found opposing order ${bestOpposingOrder.orderId} with zero available quantity. Marking as FILLED.`);
       bestOpposingOrder.status = "FILLED";
       await bestOpposingOrder.save();
       continue;
@@ -58,7 +56,8 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
       buyOrderId: incomingOrder.side === "BUY" ? incomingOrder.orderId : bestOpposingOrder.orderId,
       sellOrderId: incomingOrder.side === "SELL" ? incomingOrder.orderId : bestOpposingOrder.orderId,
       price: executionPrice,
-      quantity: matchQty
+      quantity: matchQty,
+      tokenType: incomingOrder.tokenType
     });
 
     // Update order fill quantities and statuses.
@@ -67,30 +66,59 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
     incomingOrder.status = incomingOrder.filledQuantity === incomingOrder.quantity ? "FILLED" : "PARTIAL";
     bestOpposingOrder.status = bestOpposingOrder.filledQuantity === bestOpposingOrder.quantity ? "FILLED" : "PARTIAL";
 
+    // Save orders *before* executing the trade balance changes
     await bestOpposingOrder.save();
-    await incomingOrder.save();
+    await incomingOrder.save(); // Save incoming order status update
 
     // Execute the trade and adjust user token balances.
-    if (incomingOrder.side === "BUY") {
-      await executeTrade(
-        incomingOrder.userId,
-        bestOpposingOrder.userId,
-        incomingOrder.marketId,
-        incomingOrder.tokenType,
-        executionPrice,
-        matchQty
-      );
-    } else {
-      await executeTrade(
-        bestOpposingOrder.userId,
-        incomingOrder.userId,
-        incomingOrder.marketId,
-        incomingOrder.tokenType,
-        executionPrice,
-        matchQty
-      );
+    const buyerId = incomingOrder.side === "BUY" ? incomingOrder.userId : bestOpposingOrder.userId;
+    const sellerId = incomingOrder.side === "SELL" ? incomingOrder.userId : bestOpposingOrder.userId;
+    const buyerLimitPrice = incomingOrder.side === "BUY" ? incomingOrder.price : bestOpposingOrder.price;
+
+    // Fetch the latest balances just before executing the trade
+    const [buyerBal, sellerBal] = await Promise.all([
+      UserBalance.findOne({ userId: buyerId }).exec(),
+      UserBalance.findOne({ userId: sellerId }).exec()
+    ]);
+
+    if (!buyerBal || !sellerBal) {
+      console.error(`[Trade Execution] Could not find balances for buyer ${buyerId} or seller ${sellerId}. Aborting trade.`);
+      // Decide how to handle this - potentially revert order status updates?
+      // For now, just log and continue the loop hoping the next match works,
+      // but this indicates a serious issue.
+      remainingQty = 0; // Stop trying to fill this incoming order if balances are missing
+      break; 
     }
+
+    await executeTrade(
+      buyerBal, // Pass fetched buyer balance
+      sellerBal, // Pass fetched seller balance
+      incomingOrder.marketId,
+      incomingOrder.tokenType,
+      executionPrice,
+      matchQty,
+      buyerLimitPrice
+    );
+
     remainingQty -= matchQty;
+
+    // Update incoming order status after processing a match
+    if (remainingQty <= 0) {
+      incomingOrder.status = "FILLED";
+      stillOpen = false; // No more quantity left to match
+    } else {
+      incomingOrder.status = "PARTIAL";
+    }
+    // Save the latest status of the incoming order within the loop
+    await incomingOrder.save();
+  }
+
+  // If the loop finished because no more matches were found (stillOpen = false)
+  // but the order wasn't fully filled, ensure its status is OPEN or PARTIAL.
+  if (remainingQty > 0 && incomingOrder.status !== "FILLED") {
+     incomingOrder.status = incomingOrder.filledQuantity > 0 ? "PARTIAL" : "OPEN";
+     // Save the final status if it wasn't fully filled and the loop exited
+     await incomingOrder.save();
   }
 }
 
@@ -113,78 +141,141 @@ export async function matchOrders(incomingOrder: IOrder): Promise<void> {
  * Note: The necessary collateral for short sales is already locked at order time.
  */
 async function executeTrade(
-  buyerId: string,
-  sellerId: string,
+  buyerBal: IUserBalance,
+  sellerBal: IUserBalance,
   marketId: string,
   tokenType: "YES" | "NO",
   price: number,
-  quantity: number
+  quantity: number, // This is the matchQty
+  buyerLimitPrice: number
 ) {
-  const [buyerBal, sellerBal] = await Promise.all([
-    UserBalance.findOne({ userId: buyerId }),
-    UserBalance.findOne({ userId: sellerId })
-  ]);
   if (!buyerBal || !sellerBal) {
-    console.error("User balance error during trade execution.");
+    console.error("User balance error during trade execution (balances not provided).");
     return;
   }
 
-  // Get or create market balances.
+  // Get or create market balances and initialize locked fields if missing
   let buyerMarket = buyerBal.markets.find(m => m.marketId === marketId);
   if (!buyerMarket) {
-    buyerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
+    buyerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedYesTokens: 0, lockedNoTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
     buyerBal.markets.push(buyerMarket);
-  }
-  let sellerMarket = sellerBal.markets.find(m => m.marketId === marketId);
-  if (!sellerMarket) {
-    sellerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
-    sellerBal.markets.push(sellerMarket);
+  } else {
+      // Ensure locked fields exist for buyer (though less critical)
+      buyerMarket.lockedYesTokens = buyerMarket.lockedYesTokens || 0;
+      buyerMarket.lockedNoTokens = buyerMarket.lockedNoTokens || 0;
+      buyerMarket.lockedCollateralYes = buyerMarket.lockedCollateralYes || 0;
+      buyerMarket.lockedCollateralNo = buyerMarket.lockedCollateralNo || 0;
   }
 
-  // Payment: Buyer pays seller immediate cost.
-  const totalCost = price * quantity;
-  if (buyerBal.availableUSD < totalCost) {
-    console.error("Buyer lacks sufficient funds for the trade!");
-    return;
+
+  let sellerMarket = sellerBal.markets.find((m: { marketId: string; }) => m.marketId === marketId);
+  if (!sellerMarket) {
+    console.warn(`[Execute Trade] No market balance found for seller ${sellerBal.userId} in market ${marketId}. Creating one.`);
+    sellerMarket = { marketId, yesTokens: 0, noTokens: 0, lockedYesTokens: 0, lockedNoTokens: 0, lockedCollateralYes: 0, lockedCollateralNo: 0 };
+    sellerBal.markets.push(sellerMarket);
+  } else {
+     // Ensure locked fields exist and initialize to 0 if undefined
+     sellerMarket.lockedYesTokens = sellerMarket.lockedYesTokens || 0;
+     sellerMarket.lockedNoTokens = sellerMarket.lockedNoTokens || 0;
+     sellerMarket.lockedCollateralYes = sellerMarket.lockedCollateralYes || 0;
+     sellerMarket.lockedCollateralNo = sellerMarket.lockedCollateralNo || 0;
   }
-  buyerBal.availableUSD -= totalCost;
-  sellerBal.availableUSD += totalCost;
+
+  // Calculate payment cost based on execution price
+  const totalCost = price * quantity;
+
+  // Calculate potential refund for the buyer due to price improvement
+  const priceDifference = buyerLimitPrice - price;
+  let refundAmount = 0;
+  if (priceDifference > 0) {
+    refundAmount = priceDifference * quantity;
+  }
+
+  // --- Seller Asset Handling ---
+  sellerBal.availableUSD += totalCost; // Seller always receives payment for the trade
 
   if (tokenType === "YES") {
-    if (sellerMarket.yesTokens >= quantity) {
-      // Normal transfer from inventory.
-      sellerMarket.yesTokens -= quantity;
+    if (sellerMarket.lockedYesTokens >= quantity) {
+      // Trade filled from seller's locked YES tokens
+      sellerMarket.lockedYesTokens -= quantity;
       buyerMarket.yesTokens += quantity;
     } else {
-      // Short sale: use available YES tokens and mint for the remainder.
-      const available = sellerMarket.yesTokens;
-      const shortAmount = quantity - available;
-      if (available > 0) {
-        sellerMarket.yesTokens -= available;
-        buyerMarket.yesTokens += available;
+      // Trade filled partially/fully via short sale (collateral was locked)
+      let remainingToShort = quantity;
+      // Use any available locked tokens first (can happen in partial fills)
+      if (sellerMarket.lockedYesTokens > 0) {
+          const useLocked = Math.min(quantity, sellerMarket.lockedYesTokens);
+          sellerMarket.lockedYesTokens -= useLocked;
+          buyerMarket.yesTokens += useLocked;
+          remainingToShort -= useLocked;
       }
-      // Mint additional YES tokens to provide to buyer.
-      buyerMarket.yesTokens += shortAmount;
-      // Credit seller with the opposite token (NO) for the short portion.
-      sellerMarket.noTokens += shortAmount;
+
+      if (remainingToShort > 0) {
+          // This portion must be covered by locked collateral (short sale)
+          if (sellerMarket.lockedCollateralYes < remainingToShort) {
+              console.error(`[Trade Execution Error] Seller ${sellerBal.userId} has insufficient lockedCollateralYes (${sellerMarket.lockedCollateralYes}) to cover short sale of ${remainingToShort} YES.`);
+              // TODO: Handle this critical error state - potentially revert trade?
+              return; // Stop processing this trade execution
+          }
+          // DO NOT consume the locked collateral here. It remains locked until settlement.
+
+          // Mint YES for buyer
+          buyerMarket.yesTokens += remainingToShort;
+          // Mint NO for seller
+          sellerMarket.noTokens += remainingToShort; // Seller receives the opposite token
+      }
     }
   } else if (tokenType === "NO") {
-    if (sellerMarket.noTokens >= quantity) {
-      sellerMarket.noTokens -= quantity;
+    if (sellerMarket.lockedNoTokens >= quantity) {
+      // Trade filled from seller's locked NO tokens
+      sellerMarket.lockedNoTokens -= quantity;
       buyerMarket.noTokens += quantity;
     } else {
-      const available = sellerMarket.noTokens;
-      const shortAmount = quantity - available;
-      if (available > 0) {
-        sellerMarket.noTokens -= available;
-        buyerMarket.noTokens += available;
+       // Trade filled partially/fully via short sale (collateral was locked)
+      let remainingToShort = quantity;
+      // Use any available locked tokens first
+      if (sellerMarket.lockedNoTokens > 0) {
+          const useLocked = Math.min(quantity, sellerMarket.lockedNoTokens);
+          sellerMarket.lockedNoTokens -= useLocked;
+          buyerMarket.noTokens += useLocked;
+          remainingToShort -= useLocked;
       }
-      // Mint additional NO tokens to supply buyer.
-      buyerMarket.noTokens += shortAmount;
-      // Credit seller with YES tokens for the shorted amount.
-      sellerMarket.yesTokens += shortAmount;
+
+      if (remainingToShort > 0) {
+          // This portion must be covered by locked collateral (short sale)
+          if (sellerMarket.lockedCollateralNo < remainingToShort) {
+              console.error(`[Trade Execution Error] Seller ${sellerBal.userId} has insufficient lockedCollateralNo (${sellerMarket.lockedCollateralNo}) to cover short sale of ${remainingToShort} NO.`);
+              // TODO: Handle this critical error state
+              return; // Stop processing this trade execution
+          }
+          // DO NOT consume the locked collateral here. It remains locked until settlement.
+
+          // Mint NO for buyer
+          buyerMarket.noTokens += remainingToShort;
+          // Mint YES for seller
+          sellerMarket.yesTokens += remainingToShort; // Seller receives the opposite token
+      }
     }
   }
 
-  await Promise.all([buyerBal.save(), sellerBal.save()]);
+  // --- Buyer Asset Handling ---
+  // Note: Buyer funds were already locked at order placement.
+  // We just need to apply the refund if the execution price was better than their limit price.
+  if (refundAmount > 0) {
+    buyerBal.availableUSD += refundAmount;
+    // TODO: Need to ensure the originally locked buyer funds are correctly marked as 'used' or removed from a 'lockedUSD' field.
+  }
+
+  // --- Final Save ---
+  // Mark markets as modified since nested properties were changed
+  buyerBal.markModified('markets');
+  sellerBal.markModified('markets');
+
+  try {
+    await Promise.all([buyerBal.save(), sellerBal.save()]);
+    console.log(`[Trade Execution] Balances saved for trade between buyer ${buyerBal.userId} and seller ${sellerBal.userId}.`);
+  } catch(error) {
+    console.error(`[Trade Execution] Error saving balances for trade between ${buyerBal.userId} and ${sellerBal.userId}:`, error);
+    // TODO: Consider how to handle save failures - potential inconsistency
+  }
 }
