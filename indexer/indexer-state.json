@@ -1,0 +1,11 @@
+{
+  "sonic": {
+    "lastProcessedBlock": "22576679",
+    "startBlock": "22446679"
+  },
+  "xion": {
+    "lastProcessedBlock": 2049210,
+    "startBlock": 2049210
+  },
+  "lastUpdated": "2025-04-10T20:09:31.890Z"
+}

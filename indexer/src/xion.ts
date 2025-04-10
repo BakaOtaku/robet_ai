@@ -2,7 +2,7 @@ import { StargateClient } from "@cosmjs/stargate";
 import axios from "axios";
 import { xionLogger } from "./utils/logger";
 import { getState, updateXionState } from "./utils/state";
-import { processUserDeposit, ChainTransaction } from "./services/dbService";
+import { processUserDeposit } from "./services/dbService";
 import crypto from "crypto";
 
 // Chain configuration

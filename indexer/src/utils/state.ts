@@ -23,8 +23,8 @@ const DEFAULT_STATE: IndexerState = {
     startBlock: "22446679",
   },
   xion: {
-    lastProcessedBlock: 12743190,
-    startBlock: 12743190,
+    lastProcessedBlock: 2049210,
+    startBlock: 2049210,
   },
   lastUpdated: new Date().toISOString(),
 };
