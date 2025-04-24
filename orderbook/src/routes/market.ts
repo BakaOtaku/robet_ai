@@ -12,13 +12,14 @@ const marketRouter = Router();
 // POST /api/market
 marketRouter.post("/", async (req: any, res: any) => {
   try {
-    const { question, creator, resolutionDate } = req.body;
+    const { question, creator, category, resolutionDate } = req.body;
     const marketId = uuidv4();
 
     const newMarket = await Market.create({
       marketId,
       question,
       creator,
+      category,
       resolutionDate,
     });
 

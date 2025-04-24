@@ -316,14 +316,15 @@ async function main() {
 
     // 0. Market Initialization
     console.log(colors.bold.magenta('\n📊 CREATING PREDICTION MARKET\n'));
-    const marketQuestion = "Will Bitcoin price exceed $150,000 by December 31?";
-    const resolutionDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days later
+    const marketQuestion = "Will India Pakistan War begin in 2025?";
+    const resolutionDate = new Date(Date.now() + 250 * 24 * 60 * 60 * 1000).toISOString(); // 7 days later
     let res = await fetch(`${BASE_URL}/market`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: marketQuestion,
         creator: traderA, // let Trader A be the market creator
+        category: "politics",
         resolutionDate
       })
     });
@@ -331,7 +332,7 @@ async function main() {
     const market = marketResp.market;
     const marketId = market.marketId;
     console.log(colors.green(`✓ Market created: "${market.question}" (ID: ${marketId})`));
-    
+    // return;
     // Show initial state
     await displayMarketStatus(marketId);
 
