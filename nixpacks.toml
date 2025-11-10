@@ -1,0 +1,13 @@
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+aptPkgs = []
+
+[phases.install]
+cmds = ["cd orderbook && npm ci"]
+
+[phases.build]
+cmds = ["cd orderbook && npm run build"]
+
+[start]
+cmd = "cd orderbook && node dist/index.js"
+
